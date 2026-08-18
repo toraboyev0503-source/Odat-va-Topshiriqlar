@@ -79,7 +79,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Topshiriq-Odatlar-0.1.0-debug
+          name: Topshiriq-Odatlar-0.1.1-debug
           path: ${{ env.PROJECT_ROOT }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: ignore
           retention-days: 14
