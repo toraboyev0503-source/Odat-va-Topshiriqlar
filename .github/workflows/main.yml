@@ -1,76 +1,109 @@
-name: Android Build
+name: Android CI
 
 on:
-  workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: ["main", "master"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Extract SOURCE ZIP
-        shell: bash
-        run: |
-          set -euo pipefail
-          ZIP_FILE="./HabitCore_0.4.0_SOURCE.zip"
-
-          if [ ! -f "${ZIP_FILE}" ]; then
-            echo "Required SOURCE ZIP not found: ${ZIP_FILE}"
-            exit 1
-          fi
-
-          rm -rf _android_project
-          mkdir -p _android_project
-          unzip -q "${ZIP_FILE}" -d _android_project
-
-          SETTINGS_FILE="$(find _android_project -type f \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \) | head -n 1)"
-
-          if [ -z "${SETTINGS_FILE}" ]; then
-            echo "settings.gradle(.kts) not found."
-            exit 1
-          fi
-
-          PROJECT_DIR="$(dirname "${SETTINGS_FILE}")"
-          echo "PROJECT_DIR=${PROJECT_DIR}" >> "${GITHUB_ENV}"
-          echo "Android project: ${PROJECT_DIR}"
-
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
-      - name: Setup Android SDK
+      - name: Set up Android SDK
         uses: android-actions/setup-android@v4
+        with:
+          log-accepted-android-sdk-licenses: false
 
-      - name: Install Android 17 SDK
+      - name: Install Android API 37
         shell: bash
         run: |
           set -euo pipefail
-          sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
+          for attempt in 1 2 3; do
+            if sdkmanager "platforms;android-37" "build-tools;36.0.0"; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "Android SDK package installation failed after 3 attempts." >&2
+              exit 1
+            fi
+            sleep 10
+          done
 
-      - name: Setup Gradle 9.4.1
-        uses: gradle/actions/setup-gradle@v4
+      - name: Set up Gradle 9.5.0
+        uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: '9.4.1'
+          gradle-version: "9.5.0"
+          cache-provider: basic
+
+      - name: Verify project and toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          test -n "$SDK_ROOT"
+          test -f settings.gradle.kts
+          test -f build.gradle.kts
+          test -f app/build.gradle.kts
+          test -f app/src/main/AndroidManifest.xml
+          test -f "$SDK_ROOT/platforms/android-37/android.jar"
+          test -d "$SDK_ROOT/build-tools/36.0.0"
+          grep -F 'version "9.3.0"' build.gradle.kts
+          grep -F 'compileSdk = 37' app/build.gradle.kts
+          java -version
+          gradle --version
 
       - name: Unit tests
-        run: gradle -p "${PROJECT_DIR}" testDebugUnitTest --stacktrace
+        run: gradle --no-daemon :app:testDebugUnitTest --stacktrace --warning-mode all --console=plain
 
-      - name: Lint
-        run: gradle -p "${PROJECT_DIR}" lintDebug --stacktrace
+      - name: Android lint
+        run: gradle --no-daemon :app:lintDebug --stacktrace --warning-mode all --console=plain
 
-      - name: Build Debug APK
-        run: gradle -p "${PROJECT_DIR}" assembleDebug --stacktrace
+      - name: Build debug APK
+        run: gradle --no-daemon :app:assembleDebug --stacktrace --warning-mode all --console=plain
+
+      - name: Verify APK exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s app/build/outputs/apk/debug/app-debug.apk
+          ls -lh app/build/outputs/apk/debug/app-debug.apk
+          sha256sum app/build/outputs/apk/debug/app-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: HabitCore-0.4.0-debug-apk
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          name: VaqtBlok-0.1.0-debug
+          path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload build reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: VaqtBlok-0.1.0-reports-${{ github.run_id }}
+          path: |
+            app/build/reports/tests/**
+            app/build/reports/lint-results-debug.*
+          if-no-files-found: ignore
+          retention-days: 7
+ 
