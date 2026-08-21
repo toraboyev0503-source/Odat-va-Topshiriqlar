@@ -33,20 +33,40 @@ jobs:
         with:
           log-accepted-android-sdk-licenses: false
 
-      - name: Install Android API 37
+      - name: Install Android SDK 36.1
         shell: bash
         run: |
           set -euo pipefail
+          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
+          if [ -z "$SDK_ROOT" ]; then
+            echo "ANDROID_SDK_ROOT/ANDROID_HOME is not set." >&2
+            exit 1
+          fi
+
+          # API 36.1 is a stable SDK package (Android 16 QPR2).
+          # Use the stable Android 16 QPR2 SDK required by current dependencies.
           for attempt in 1 2 3; do
-            if sdkmanager "platforms;android-37" "build-tools;36.0.0"; then
+            sdkmanager \
+              "platform-tools" \
+              "platforms;android-36.1" \
+              "build-tools;36.0.0" || true
+
+            if [ -f "$SDK_ROOT/platforms/android-36.1/android.jar" ] && \
+               [ -x "$SDK_ROOT/build-tools/36.0.0/aapt2" ]; then
+              echo "Android SDK 36.1 installed successfully."
               exit 0
             fi
-            if [ "$attempt" -eq 3 ]; then
-              echo "Android SDK package installation failed after 3 attempts." >&2
-              exit 1
+
+            if [ "$attempt" -lt 3 ]; then
+              echo "SDK install verification failed; retrying ($attempt/3)..." >&2
+              sleep 10
             fi
-            sleep 10
           done
+
+          echo "Android SDK package installation failed after 3 attempts." >&2
+          echo "Available 36.x platform packages:" >&2
+          sdkmanager --list 2>/dev/null | grep -E 'platforms;android-36([.;]|$)' || true
+          exit 1
 
       - name: Set up Gradle 9.5.0
         uses: gradle/actions/setup-gradle@v6
@@ -64,10 +84,11 @@ jobs:
           test -f build.gradle.kts
           test -f app/build.gradle.kts
           test -f app/src/main/AndroidManifest.xml
-          test -f "$SDK_ROOT/platforms/android-37/android.jar"
-          test -d "$SDK_ROOT/build-tools/36.0.0"
+          test -f "$SDK_ROOT/platforms/android-36.1/android.jar"
+          test -x "$SDK_ROOT/build-tools/36.0.0/aapt2"
           grep -F 'version "9.3.0"' build.gradle.kts
-          grep -F 'compileSdk = 37' app/build.gradle.kts
+          grep -F 'version = release(36)' app/build.gradle.kts
+          grep -F 'minorApiLevel = 1' app/build.gradle.kts
           java -version
           gradle --version
 
