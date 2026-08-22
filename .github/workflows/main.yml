@@ -1,236 +1,75 @@
-name: Android CI
+name: Android Build
 
 on:
-  push:
-    branches: ["main", "master"]
-  pull_request:
   workflow_dispatch:
-
-permissions:
-  contents: read
-
-concurrency:
-  group: android-ci-${{ github.ref }}
-  cancel-in-progress: true
+  push:
+    branches: [ main ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v7
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # GitHub does not unpack uploaded ZIP files. This step supports both:
-      # 1) a normally extracted Android project, and
-      # 2) the VaqtBlok SOURCE ZIP uploaded directly from a phone.
-      - name: Prepare VaqtBlok project
+      - name: Extract SOURCE ZIP
         shell: bash
         run: |
           set -euo pipefail
-          ROOT="$GITHUB_WORKSPACE"
+          ZIP_FILE="./HabitCore_0.4.1_SOURCE.zip"
 
-          is_vaqtblok_project() {
-            local dir="$1"
-            local app_build=""
-            if [ -f "$dir/app/build.gradle.kts" ]; then
-              app_build="$dir/app/build.gradle.kts"
-            elif [ -f "$dir/app/build.gradle" ]; then
-              app_build="$dir/app/build.gradle"
-            else
-              return 1
-            fi
-
-            [ -f "$dir/settings.gradle.kts" ] || [ -f "$dir/settings.gradle" ] || return 1
-            grep -Fq 'uz.vaqtblok.app' "$app_build"
-          }
-
-          find_vaqtblok_project() {
-            if is_vaqtblok_project "$ROOT"; then
-              printf '%s\n' "$ROOT"
-              return 0
-            fi
-
-            while IFS= read -r app_build; do
-              candidate="$(dirname "$(dirname "$app_build")")"
-              if is_vaqtblok_project "$candidate"; then
-                printf '%s\n' "$candidate"
-                return 0
-              fi
-            done < <(find "$ROOT" -maxdepth 6 -type f \
-              \( -path '*/app/build.gradle.kts' -o -path '*/app/build.gradle' \) -print)
-
-            return 1
-          }
-
-          PROJECT_DIR="$(find_vaqtblok_project || true)"
-
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "No extracted VaqtBlok Gradle project found. Looking for a SOURCE ZIP..."
-            ZIP_FILE=""
-
-            for preferred in \
-              "$ROOT/VaqtBlok-0.1.0-github-ready-source.zip" \
-              "$ROOT/VaqtBlok-0.1.0-ci-fixed-source.zip" \
-              "$ROOT/VaqtBlok-0.1.0-verified-source.zip" \
-              "$ROOT/VaqtBlok-0.1.0-source.zip"; do
-              if [ -f "$preferred" ]; then
-                ZIP_FILE="$preferred"
-                break
-              fi
-            done
-
-            if [ -z "$ZIP_FILE" ]; then
-              ZIP_FILE="$(find "$ROOT" -maxdepth 3 -type f \
-                \( -iname 'VaqtBlok*-source.zip' -o -iname 'VaqtBlok*.zip' \) \
-                -print -quit)"
-            fi
-
-            if [ -z "$ZIP_FILE" ]; then
-              echo "ERROR: VaqtBlok project files and SOURCE ZIP are both missing." >&2
-              echo "Repository files:" >&2
-              find "$ROOT" -maxdepth 3 -type f -printf '%P\n' | sort >&2
-              exit 1
-            fi
-
-            echo "Extracting: ${ZIP_FILE#$ROOT/}"
-            EXTRACT_DIR="$ROOT/ci_source"
-            rm -rf "$EXTRACT_DIR"
-            mkdir -p "$EXTRACT_DIR"
-            unzip -q "$ZIP_FILE" -d "$EXTRACT_DIR"
-
-            PROJECT_DIR="$(find_vaqtblok_project || true)"
-          fi
-
-          if [ -z "$PROJECT_DIR" ]; then
-            echo "ERROR: SOURCE ZIP was extracted, but a valid VaqtBlok project was not found." >&2
-            find "$ROOT/ci_source" -maxdepth 5 -type f -printf '%P\n' | sort >&2 || true
+          if [ ! -f "${ZIP_FILE}" ]; then
+            echo "Required SOURCE ZIP not found: ${ZIP_FILE}"
             exit 1
           fi
 
-          PROJECT_REL="${PROJECT_DIR#$ROOT/}"
-          if [ "$PROJECT_DIR" = "$ROOT" ]; then
-            PROJECT_REL="."
+          rm -rf _android_project
+          mkdir -p _android_project
+          unzip -q "${ZIP_FILE}" -d _android_project
+
+          SETTINGS_FILE="$(find _android_project -type f \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \) | head -n 1)"
+
+          if [ -z "${SETTINGS_FILE}" ]; then
+            echo "settings.gradle(.kts) not found."
+            exit 1
           fi
 
-          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "PROJECT_REL=$PROJECT_REL" >> "$GITHUB_ENV"
-          echo "VaqtBlok project root: $PROJECT_REL"
-          find "$PROJECT_DIR" -maxdepth 2 -type f -printf '%P\n' | sort | head -n 80
+          PROJECT_DIR="$(dirname "${SETTINGS_FILE}")"
+          echo "PROJECT_DIR=${PROJECT_DIR}" >> "${GITHUB_ENV}"
 
-      - name: Set up JDK 17
-        uses: actions/setup-java@v5
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
-      - name: Set up Android SDK
+      - name: Setup Android SDK
         uses: android-actions/setup-android@v4
-        with:
-          log-accepted-android-sdk-licenses: false
 
-      - name: Install Android SDK 36.1
+      - name: Install Android 17 SDK
         shell: bash
         run: |
           set -euo pipefail
-          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
-          if [ -z "$SDK_ROOT" ]; then
-            echo "ANDROID_SDK_ROOT/ANDROID_HOME is not set." >&2
-            exit 1
-          fi
+          sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
 
-          for attempt in 1 2 3; do
-            sdkmanager \
-              "platform-tools" \
-              "platforms;android-36.1" \
-              "build-tools;36.0.0" || true
-
-            if [ -f "$SDK_ROOT/platforms/android-36.1/android.jar" ] && \
-               [ -x "$SDK_ROOT/build-tools/36.0.0/aapt2" ]; then
-              echo "Android SDK 36.1 installed successfully."
-              exit 0
-            fi
-
-            if [ "$attempt" -lt 3 ]; then
-              echo "SDK verification failed; retrying ($attempt/3)..." >&2
-              sleep 10
-            fi
-          done
-
-          echo "Android SDK 36.1 installation failed after 3 attempts." >&2
-          sdkmanager --list 2>/dev/null | grep -E 'platforms;android-36([.;]|$)' || true
-          exit 1
-
-      - name: Set up Gradle 9.5.0
-        uses: gradle/actions/setup-gradle@v6
+      - name: Setup Gradle 9.4.1
+        uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: "9.5.0"
-
-      - name: Verify project and toolchain
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$PROJECT_DIR"
-          SDK_ROOT="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
-
-          test -f settings.gradle.kts -o -f settings.gradle
-          test -f build.gradle.kts -o -f build.gradle
-          test -f app/build.gradle.kts -o -f app/build.gradle
-          test -f app/src/main/AndroidManifest.xml
-          test -f "$SDK_ROOT/platforms/android-36.1/android.jar"
-          test -x "$SDK_ROOT/build-tools/36.0.0/aapt2"
-          grep -R -Fq 'uz.vaqtblok.app' app/build.gradle.kts app/build.gradle 2>/dev/null
-
-          echo "Project: $PROJECT_REL"
-          java -version
-          gradle --version
+          gradle-version: '9.4.1'
 
       - name: Unit tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$PROJECT_DIR"
-          gradle --no-daemon :app:testDebugUnitTest --stacktrace --warning-mode all --console=plain
+        run: gradle -p "${PROJECT_DIR}" testDebugUnitTest --stacktrace
 
-      - name: Android lint
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$PROJECT_DIR"
-          gradle --no-daemon :app:lintDebug --stacktrace --warning-mode all --console=plain
+      - name: Lint
+        run: gradle -p "${PROJECT_DIR}" lintDebug --stacktrace
 
-      - name: Build debug APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$PROJECT_DIR"
-          gradle --no-daemon :app:assembleDebug --stacktrace --warning-mode all --console=plain
-
-      - name: Verify APK exists
-        shell: bash
-        run: |
-          set -euo pipefail
-          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
-          test -s "$APK"
-          ls -lh "$APK"
-          sha256sum "$APK"
+      - name: Build Debug APK
+        run: gradle -p "${PROJECT_DIR}" assembleDebug --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: VaqtBlok-0.1.0-debug
+          name: HabitCore-0.4.1-debug-apk
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-          retention-days: 14
-
-      - name: Upload build reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: VaqtBlok-0.1.0-reports-${{ github.run_id }}
-          path: |
-            ${{ env.PROJECT_DIR }}/app/build/reports/tests/**
-            ${{ env.PROJECT_DIR }}/app/build/reports/lint-results-debug.*
-          if-no-files-found: ignore
-          retention-days: 7
