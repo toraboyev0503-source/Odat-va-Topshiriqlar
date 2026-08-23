@@ -17,7 +17,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ZIP_FILE="./HabitCore_0.8.3_SOURCE.zip"
+          ZIP_FILE="./HabitCore_0.8.4_SOURCE.zip"
 
           if [ ! -f "${ZIP_FILE}" ]; then
             echo "Required SOURCE ZIP not found: ${ZIP_FILE}"
@@ -69,6 +69,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: HabitCore-0.8.3-debug-apk
+          name: HabitCore-0.8.4-debug-apk
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
