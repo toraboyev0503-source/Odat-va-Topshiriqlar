@@ -17,7 +17,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          ZIP_FILE="./HabitCore_0.8.2_SOURCE.zip"
+          ZIP_FILE="./HabitCore_0.8.3_SOURCE.zip"
 
           if [ ! -f "${ZIP_FILE}" ]; then
             echo "Required SOURCE ZIP not found: ${ZIP_FILE}"
@@ -36,7 +36,6 @@ jobs:
 
           PROJECT_DIR="$(dirname "${SETTINGS_FILE}")"
           echo "PROJECT_DIR=${PROJECT_DIR}" >> "${GITHUB_ENV}"
-          echo "Android project: ${PROJECT_DIR}"
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -47,7 +46,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
 
-      - name: Install Android 17 SDK
+      - name: Install Android SDK 37
         shell: bash
         run: |
           set -euo pipefail
@@ -70,6 +69,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: HabitCore-0.8.2-debug-apk
+          name: HabitCore-0.8.3-debug-apk
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
