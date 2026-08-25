@@ -25,8 +25,28 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Create Android platform files
-        run: flutter create --platforms=android --org uz.shuhrat --project-name soz_yodlash .
+      - name: Verify app source
+        shell: bash
+        run: |
+          test -f pubspec.yaml || { echo "pubspec.yaml topilmadi"; exit 1; }
+          test -f lib/main.dart || { echo "lib/main.dart topilmadi"; exit 1; }
+          test -f assets/data/lessons.json || { echo "assets/data/lessons.json topilmadi"; exit 1; }
+          if grep -q "Flutter Demo Home Page" lib/main.dart; then
+            echo "XATO: lib/main.dart Flutter demo kodi bilan almashtirilgan."
+            exit 1
+          fi
+
+      - name: Create Android platform files safely
+        shell: bash
+        run: |
+          rm -rf /tmp/soz_yodlash_platform
+          flutter create \
+            --platforms=android \
+            --org uz.shuhrat \
+            --project-name soz_yodlash \
+            /tmp/soz_yodlash_platform
+          rm -rf android
+          cp -R /tmp/soz_yodlash_platform/android ./android
 
       - name: Configure Android notifications
         shell: bash
@@ -113,7 +133,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: soz-yodlash-debug-apk
+          name: soz-yodlash-v1.1.1-debug-apk
           path: build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
           retention-days: 14
