@@ -1,6 +1,6 @@
 name: Build Android APK
 
-"on":
+on:
   workflow_dispatch:
   push:
     branches: ["main", "master"]
@@ -25,98 +25,12 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Verify app source
-        shell: bash
-        run: |
-          test -f pubspec.yaml || { echo "pubspec.yaml topilmadi"; exit 1; }
-          test -f lib/main.dart || { echo "lib/main.dart topilmadi"; exit 1; }
-          test -f assets/data/lessons.json || { echo "assets/data/lessons.json topilmadi"; exit 1; }
-          if grep -q "Flutter Demo Home Page" lib/main.dart; then
-            echo "XATO: lib/main.dart Flutter demo kodi bilan almashtirilgan."
-            exit 1
-          fi
-
-      - name: Create Android platform files safely
-        shell: bash
-        run: |
-          rm -rf /tmp/soz_yodlash_platform
-          flutter create \
-            --platforms=android \
-            --org uz.shuhrat \
-            --project-name soz_yodlash \
-            /tmp/soz_yodlash_platform
-          rm -rf android
-          cp -R /tmp/soz_yodlash_platform/android ./android
+      - name: Create Android platform files
+        run: flutter create --platforms=android --org uz.shuhrat --project-name soz_yodlash .
 
       - name: Configure Android notifications
-        shell: bash
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-
-          manifest_path = Path('android/app/src/main/AndroidManifest.xml')
-          gradle_kts_path = Path('android/app/build.gradle.kts')
-          gradle_groovy_path = Path('android/app/build.gradle')
-
-          if not manifest_path.exists():
-              raise SystemExit('AndroidManifest.xml topilmadi')
-
-          text = manifest_path.read_text(encoding='utf-8')
-          text = text.replace('android:label="soz_yodlash"', 'android:label="So\'z yodlash"')
-
-          manifest_tag = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
-          permissions = []
-          if 'android.permission.POST_NOTIFICATIONS' not in text:
-              permissions.append('    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>')
-          if 'android.permission.RECEIVE_BOOT_COMPLETED' not in text:
-              permissions.append('    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>')
-          if permissions:
-              text = text.replace(manifest_tag, manifest_tag + '\n' + '\n'.join(permissions), 1)
-
-          if 'ScheduledNotificationReceiver' not in text:
-              receivers = '''
-                  <receiver
-                      android:exported="false"
-                      android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
-                  <receiver
-                      android:exported="false"
-                      android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
-                      <intent-filter>
-                          <action android:name="android.intent.action.BOOT_COMPLETED"/>
-                          <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
-                          <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
-                          <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
-                      </intent-filter>
-                  </receiver>
-          '''
-              text = text.replace('</application>', receivers + '    </application>', 1)
-
-          manifest_path.write_text(text, encoding='utf-8')
-
-          if gradle_kts_path.exists():
-              g = gradle_kts_path.read_text(encoding='utf-8')
-              g = g.replace('compileSdk = flutter.compileSdkVersion', 'compileSdk = 35')
-              g = g.replace('JavaVersion.VERSION_11', 'JavaVersion.VERSION_17')
-              g = g.replace('JavaVersion.VERSION_1_8', 'JavaVersion.VERSION_17')
-              if 'isCoreLibraryDesugaringEnabled' not in g:
-                  g = g.replace('compileOptions {', 'compileOptions {\n        isCoreLibraryDesugaringEnabled = true', 1)
-              if 'coreLibraryDesugaring(' not in g:
-                  g += '\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
-              gradle_kts_path.write_text(g, encoding='utf-8')
-          elif gradle_groovy_path.exists():
-              g = gradle_groovy_path.read_text(encoding='utf-8')
-              g = g.replace('compileSdkVersion flutter.compileSdkVersion', 'compileSdkVersion 35')
-              g = g.replace('compileSdk flutter.compileSdkVersion', 'compileSdk 35')
-              g = g.replace('JavaVersion.VERSION_11', 'JavaVersion.VERSION_17')
-              g = g.replace('JavaVersion.VERSION_1_8', 'JavaVersion.VERSION_17')
-              if 'coreLibraryDesugaringEnabled' not in g:
-                  g = g.replace('compileOptions {', 'compileOptions {\n        coreLibraryDesugaringEnabled true', 1)
-              if 'coreLibraryDesugaring ' not in g:
-                  g += "\n\ndependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n}\n"
-              gradle_groovy_path.write_text(g, encoding='utf-8')
-          else:
-              raise SystemExit('Android app Gradle fayli topilmadi')
-          PY
+        shell: pwsh
+        run: ./tools/configure_android.ps1
 
       - name: Install dependencies
         run: flutter pub get
@@ -133,7 +47,7 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: soz-yodlash-v1.1.1-debug-apk
+          name: soz-yodlash-debug-apk
           path: build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
           retention-days: 14
