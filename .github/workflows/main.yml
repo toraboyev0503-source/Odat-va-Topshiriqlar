@@ -117,7 +117,7 @@ jobs:
               raise SystemExit("AndroidManifest.xml topilmadi")
 
           text = manifest.read_text(encoding="utf-8")
-          text = text.replace('android:label="soz_yodlash"', 'android:label="So\\'z yodlash"')
+          text = text.replace('android:label="soz_yodlash"', 'android:label="So‘z yodlash"')
 
           manifest_open = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
           permissions = []
@@ -243,12 +243,12 @@ jobs:
           APK="$APP_DIR/build/app/outputs/flutter-apk/app-debug.apk"
           test -f "$APK" || { echo "APK topilmadi"; exit 1; }
 
-          cp "$APK" "$GITHUB_WORKSPACE/soz-yodlash-v1.1.1-debug.apk"
+          cp "$APK" "$GITHUB_WORKSPACE/soz-yodlash-v1.1.2-debug.apk"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: soz-yodlash-v1.1.1-debug-apk
-          path: soz-yodlash-v1.1.1-debug.apk
+          name: soz-yodlash-v1.1.2-debug-apk
+          path: soz-yodlash-v1.1.2-debug.apk
           if-no-files-found: error
           retention-days: 14
