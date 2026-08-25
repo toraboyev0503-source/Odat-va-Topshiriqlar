@@ -32,14 +32,17 @@ jobs:
         run: |
           set -euo pipefail
 
+          # If full Flutter source was uploaded directly, use it.
           if [ -f "$GITHUB_WORKSPACE/pubspec.yaml" ] && [ -f "$GITHUB_WORKSPACE/lib/main.dart" ]; then
             APP_DIR="$GITHUB_WORKSPACE"
-            echo "Flutter source found directly in repository root."
+            echo "Flutter source found in repository root."
           else
-            ZIP_FILE="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type f \( -name 'Soz_yodlash_SOURCE*.zip' -o -name 'Soz_yodlash*.zip' \) | sort | head -n 1 || true)"
+            # IMPORTANT: only choose the real app-source ZIP.
+            ZIP_FILE="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type f -name 'Soz_yodlash_APP_SOURCE*.zip' | sort | tail -n 1 || true)"
 
             if [ -z "$ZIP_FILE" ]; then
-              echo "XATO: pubspec.yaml ham, Soz_yodlash SOURCE ZIP ham topilmadi."
+              echo "XATO: Soz_yodlash_APP_SOURCE*.zip topilmadi."
+              echo "Repository boshiga Soz_yodlash_APP_SOURCE_v1.1.2.zip faylini yuklang."
               exit 1
             fi
 
@@ -49,15 +52,16 @@ jobs:
             unzip -q "$ZIP_FILE" -d "$APP_DIR"
 
             if [ ! -f "$APP_DIR/pubspec.yaml" ]; then
-              PUBSPEC="$(find "$APP_DIR" -maxdepth 3 -type f -name pubspec.yaml | head -n 1 || true)"
+              PUBSPEC="$(find "$APP_DIR" -maxdepth 4 -type f -name pubspec.yaml | head -n 1 || true)"
               if [ -z "$PUBSPEC" ]; then
-                echo "XATO: ZIP ichida pubspec.yaml topilmadi."
+                echo "XATO: tanlangan APP_SOURCE ZIP ichida pubspec.yaml topilmadi."
+                unzip -l "$ZIP_FILE" | head -n 80 || true
                 exit 1
               fi
               APP_DIR="$(dirname "$PUBSPEC")"
             fi
 
-            echo "Flutter source extracted from: $ZIP_FILE"
+            echo "Using source ZIP: $ZIP_FILE"
           fi
 
           echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
@@ -74,11 +78,16 @@ jobs:
           test -f assets/data/lessons.json || { echo "assets/data/lessons.json topilmadi"; exit 1; }
 
           if grep -q "Flutter Demo Home Page" lib/main.dart; then
-            echo "XATO: lib/main.dart Flutter demo kodi bilan almashtirilgan."
+            echo "XATO: Flutter demo main.dart aniqlandi."
             exit 1
           fi
 
-          echo "Haqiqiy So'z yodlash manba kodi topildi."
+          grep -q "^name: soz_yodlash" pubspec.yaml || {
+            echo "XATO: noto'g'ri Flutter loyiha tanlandi."
+            exit 1
+          }
+
+          echo "So'z yodlash source verified."
 
       - name: Create Android platform safely
         shell: bash
@@ -98,7 +107,7 @@ jobs:
           rm -rf android
           cp -R "$TMP_PLATFORM/android" ./android
 
-          echo "Android platform created without touching lib/ or assets/."
+          echo "Android platform created without changing lib/ or assets/."
 
       - name: Configure Android notifications
         shell: bash
@@ -117,7 +126,12 @@ jobs:
               raise SystemExit("AndroidManifest.xml topilmadi")
 
           text = manifest.read_text(encoding="utf-8")
-          text = text.replace('android:label="soz_yodlash"', 'android:label="So‘z yodlash"')
+
+          # Safe Unicode apostrophe avoids shell/Python quote conflicts.
+          text = text.replace(
+              'android:label="soz_yodlash"',
+              'android:label="So‘z yodlash"',
+          )
 
           manifest_open = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
           permissions = []
@@ -154,7 +168,11 @@ jobs:
                       </intent-filter>
                   </receiver>
               """
-              text = text.replace("</application>", receivers + "\n    </application>", 1)
+              text = text.replace(
+                  "</application>",
+                  receivers + "\n    </application>",
+                  1,
+              )
 
           manifest.write_text(text, encoding="utf-8")
 
@@ -170,15 +188,16 @@ jobs:
                       1,
                   )
 
-              if 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:' not in g:
+              dep = 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
+              if dep not in g:
                   if "\ndependencies {" in g:
                       g = g.replace(
                           "\ndependencies {",
-                          '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")',
+                          "\ndependencies {\n    " + dep,
                           1,
                       )
                   else:
-                      g += '\n\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")\n}\n'
+                      g += "\n\ndependencies {\n    " + dep + "\n}\n"
 
               gradle_kts.write_text(g, encoding="utf-8")
 
@@ -194,18 +213,18 @@ jobs:
                       1,
                   )
 
-              if "coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:" not in g:
+              dep = "coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'"
+              if dep not in g:
                   if "\ndependencies {" in g:
                       g = g.replace(
                           "\ndependencies {",
-                          "\ndependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'",
+                          "\ndependencies {\n    " + dep,
                           1,
                       )
                   else:
-                      g += "\n\ndependencies {\n    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'\n}\n"
+                      g += "\n\ndependencies {\n    " + dep + "\n}\n"
 
               gradle_groovy.write_text(g, encoding="utf-8")
-
           else:
               raise SystemExit("android/app Gradle fayli topilmadi")
 
