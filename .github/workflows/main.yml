@@ -1,9 +1,9 @@
-name: Android Build
+name: Build Android APK
 
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches: ["main", "master"]
 
 jobs:
   build:
@@ -13,62 +13,41 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extract SOURCE ZIP
-        shell: bash
-        run: |
-          set -euo pipefail
-          ZIP_FILE="./HabitCore_0.8.4_SOURCE.zip"
-
-          if [ ! -f "${ZIP_FILE}" ]; then
-            echo "Required SOURCE ZIP not found: ${ZIP_FILE}"
-            exit 1
-          fi
-
-          rm -rf _android_project
-          mkdir -p _android_project
-          unzip -q "${ZIP_FILE}" -d _android_project
-
-          SETTINGS_FILE="$(find _android_project -type f \( -name 'settings.gradle.kts' -o -name 'settings.gradle' \) | head -n 1)"
-          if [ -z "${SETTINGS_FILE}" ]; then
-            echo "settings.gradle(.kts) not found"
-            exit 1
-          fi
-
-          PROJECT_DIR="$(dirname "${SETTINGS_FILE}")"
-          echo "PROJECT_DIR=${PROJECT_DIR}" >> "${GITHUB_ENV}"
-
-      - name: Setup Java 17
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
-
-      - name: Install Android SDK 37
-        shell: bash
-        run: |
-          set -euo pipefail
-          sdkmanager "platform-tools" "platforms;android-37.0" "build-tools;37.0.0"
-
-      - name: Setup Gradle 9.4.1
-        uses: gradle/actions/setup-gradle@v4
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
         with:
-          gradle-version: '9.4.1'
+          channel: stable
+          cache: true
 
-      - name: Unit tests
-        run: gradle -p "${PROJECT_DIR}" testDebugUnitTest --stacktrace
+      - name: Create Android platform files
+        run: flutter create --platforms=android --org uz.shuhrat --project-name soz_yodlash .
 
-      - name: Lint
-        run: gradle -p "${PROJECT_DIR}" lintDebug --stacktrace
+      - name: Configure Android notifications
+        shell: pwsh
+        run: ./tools/configure_android.ps1
 
-      - name: Build Debug APK
-        run: gradle -p "${PROJECT_DIR}" assembleDebug --stacktrace
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Build debug APK
+        run: flutter build apk --debug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: HabitCore-0.8.4-debug-apk
-          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/app-debug.apk
+          name: soz-yodlash-debug-apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
+          retention-days: 14
