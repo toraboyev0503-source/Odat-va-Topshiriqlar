@@ -1,0 +1,89 @@
+name: Memora Debug APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Locate or unpack Android source
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -f "./settings.gradle.kts" && -d "./app" ]]; then
+            echo "project_dir=." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          ZIP_FILE="$(find . -maxdepth 2 -type f -name '*.zip' ! -path './.git/*' | head -n 1 || true)"
+          if [[ -z "$ZIP_FILE" ]]; then
+            echo "::error::No Android project or source ZIP was found."
+            exit 1
+          fi
+
+          rm -rf .ci-source
+          mkdir -p .ci-source
+          unzip -q "$ZIP_FILE" -d .ci-source
+
+          SETTINGS="$(find .ci-source -type f -name settings.gradle.kts | head -n 1 || true)"
+          if [[ -z "$SETTINGS" ]]; then
+            echo "::error::The ZIP does not contain settings.gradle.kts."
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$SETTINGS")"
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+          echo "Project: $PROJECT_DIR"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          gradle-version: '8.13'
+          # CI uses the Gradle version installed above via the `gradle` command,
+          # not the wrapper JAR contained in the source ZIP.
+          validate-wrappers: false
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;35.0.0" "platform-tools"
+
+      - name: Run unit tests
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        run: gradle --no-daemon --stacktrace testDebugUnitTest
+
+      - name: Run Android lint
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        run: gradle --no-daemon --stacktrace lintDebug
+
+      - name: Build debug APK
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        run: gradle --no-daemon --stacktrace assembleDebug
+
+      - name: Upload app-debug.apk
+        uses: actions/upload-artifact@v4
+        with:
+          name: Memora-0.4.3-debug-apk
+          path: ${{ steps.source.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 14
