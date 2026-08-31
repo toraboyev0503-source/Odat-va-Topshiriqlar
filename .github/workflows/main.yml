@@ -20,22 +20,31 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "Repository files:"
+          find . -maxdepth 3 -type f ! -path './.git/*' -print | sort | head -n 200
+
           if [[ -f "./settings.gradle.kts" && -d "./app" ]]; then
             echo "project_dir=." >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
-          ZIP_FILE="$(find . -maxdepth 2 -type f -name '*.zip' ! -path './.git/*' | head -n 1 || true)"
+          # Prefer the current Memora source archive, then fall back to any ZIP.
+          ZIP_FILE="$(find . -type f -name 'Memora-0.4.3-source.zip' ! -path './.git/*' -print -quit || true)"
           if [[ -z "$ZIP_FILE" ]]; then
-            echo "::error::No Android project or source ZIP was found."
+            ZIP_FILE="$(find . -type f -iname '*.zip' ! -path './.git/*' -print -quit || true)"
+          fi
+
+          if [[ -z "$ZIP_FILE" ]]; then
+            echo "::error::No Android project or source ZIP was found in the repository. Upload Memora-0.4.3-source.zip to the repository and rerun this workflow."
             exit 1
           fi
 
+          echo "Using source ZIP: $ZIP_FILE"
           rm -rf .ci-source
           mkdir -p .ci-source
           unzip -q "$ZIP_FILE" -d .ci-source
 
-          SETTINGS="$(find .ci-source -type f -name settings.gradle.kts | head -n 1 || true)"
+          SETTINGS="$(find .ci-source -type f -name 'settings.gradle.kts' -print -quit || true)"
           if [[ -z "$SETTINGS" ]]; then
             echo "::error::The ZIP does not contain settings.gradle.kts."
             exit 1
@@ -55,8 +64,6 @@ jobs:
         uses: gradle/actions/setup-gradle@v6
         with:
           gradle-version: '8.13'
-          # CI uses the Gradle version installed above via the `gradle` command,
-          # not the wrapper JAR contained in the source ZIP.
           validate-wrappers: false
 
       - name: Set up Android SDK
@@ -83,7 +90,7 @@ jobs:
       - name: Upload app-debug.apk
         uses: actions/upload-artifact@v4
         with:
-          name: Memora-0.4.2-debug-apk
+          name: Memora-0.4.3-debug-apk
           path: ${{ steps.source.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
