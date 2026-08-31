@@ -1,260 +1,89 @@
-name: Build Android APK
+name: Memora Debug APK
 
-"on":
+on:
   workflow_dispatch:
   push:
-    branches:
-      - main
-      - master
+    branches: [ "main", "master" ]
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v7
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
+      - name: Locate or unpack Android source
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -f "./settings.gradle.kts" && -d "./app" ]]; then
+            echo "project_dir=." >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          ZIP_FILE="$(find . -maxdepth 2 -type f -name '*.zip' ! -path './.git/*' | head -n 1 || true)"
+          if [[ -z "$ZIP_FILE" ]]; then
+            echo "::error::No Android project or source ZIP was found."
+            exit 1
+          fi
+
+          rm -rf .ci-source
+          mkdir -p .ci-source
+          unzip -q "$ZIP_FILE" -d .ci-source
+
+          SETTINGS="$(find .ci-source -type f -name settings.gradle.kts | head -n 1 || true)"
+          if [[ -z "$SETTINGS" ]]; then
+            echo "::error::The ZIP does not contain settings.gradle.kts."
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$SETTINGS")"
+          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+          echo "Project: $PROJECT_DIR"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
 
-      - name: Set up Flutter
-        uses: subosito/flutter-action@v2
+      - name: Set up Gradle 8.13
+        uses: gradle/actions/setup-gradle@v6
         with:
-          channel: stable
-          cache: true
+          gradle-version: '8.13'
+          # CI uses the Gradle version installed above via the `gradle` command,
+          # not the wrapper JAR contained in the source ZIP.
+          validate-wrappers: false
 
-      - name: Prepare app source
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK 36
         shell: bash
         run: |
-          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;35.0.0" "platform-tools"
 
-          ZIP_FILE="$GITHUB_WORKSPACE/Soz_yodlash_APP_SOURCE_v1.1.3.zip"
-          if [ ! -f "$ZIP_FILE" ]; then
-            echo "XATO: Soz_yodlash_APP_SOURCE_v1.1.3.zip topilmadi."
-            echo "Fayl repository boshida aynan shu nom bilan turishi kerak."
-            exit 1
-          fi
+      - name: Run unit tests
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        run: gradle --no-daemon --stacktrace testDebugUnitTest
 
-          APP_DIR="$RUNNER_TEMP/soz_yodlash_app"
-          rm -rf "$APP_DIR"
-          mkdir -p "$APP_DIR"
-          unzip -q "$ZIP_FILE" -d "$APP_DIR"
-
-          if [ ! -f "$APP_DIR/pubspec.yaml" ]; then
-            echo "XATO: APP_SOURCE ZIP ildizida pubspec.yaml topilmadi."
-            unzip -l "$ZIP_FILE" | head -n 80 || true
-            exit 1
-          fi
-
-          echo "Using exact source ZIP: $ZIP_FILE"
-          echo "APP_DIR=$APP_DIR" >> "$GITHUB_ENV"
-          echo "APP_DIR=$APP_DIR"
-
-      - name: Verify real app source
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$APP_DIR"
-
-          test -f pubspec.yaml || { echo "pubspec.yaml topilmadi"; exit 1; }
-          test -f lib/main.dart || { echo "lib/main.dart topilmadi"; exit 1; }
-          test -f assets/data/lessons.json || { echo "assets/data/lessons.json topilmadi"; exit 1; }
-
-          if grep -q "Flutter Demo Home Page" lib/main.dart; then
-            echo "XATO: Flutter demo main.dart aniqlandi."
-            exit 1
-          fi
-
-          grep -q "^name: soz_yodlash" pubspec.yaml || {
-            echo "XATO: noto'g'ri Flutter loyiha tanlandi."
-            exit 1
-          }
-
-          echo "So'z yodlash source verified."
-
-      - name: Create Android platform safely
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          TMP_PLATFORM="$RUNNER_TEMP/soz_yodlash_platform"
-          rm -rf "$TMP_PLATFORM"
-
-          flutter create \
-            --platforms=android \
-            --org uz.shuhrat \
-            --project-name soz_yodlash \
-            "$TMP_PLATFORM"
-
-          cd "$APP_DIR"
-          rm -rf android
-          cp -R "$TMP_PLATFORM/android" ./android
-
-          echo "Android platform created without changing lib/ or assets/."
-
-      - name: Configure Android notifications
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$APP_DIR"
-
-          python3 <<'PY'
-          from pathlib import Path
-
-          manifest = Path("android/app/src/main/AndroidManifest.xml")
-          gradle_kts = Path("android/app/build.gradle.kts")
-          gradle_groovy = Path("android/app/build.gradle")
-
-          if not manifest.exists():
-              raise SystemExit("AndroidManifest.xml topilmadi")
-
-          text = manifest.read_text(encoding="utf-8")
-
-          # Safe Unicode apostrophe avoids shell/Python quote conflicts.
-          text = text.replace(
-              'android:label="soz_yodlash"',
-              'android:label="So‘z yodlash"',
-          )
-
-          manifest_open = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
-          permissions = []
-
-          if "android.permission.POST_NOTIFICATIONS" not in text:
-              permissions.append(
-                  '    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>'
-              )
-          if "android.permission.RECEIVE_BOOT_COMPLETED" not in text:
-              permissions.append(
-                  '    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>'
-              )
-
-          if permissions:
-              text = text.replace(
-                  manifest_open,
-                  manifest_open + "\n" + "\n".join(permissions),
-                  1,
-              )
-
-          if "ScheduledNotificationReceiver" not in text:
-              receivers = """
-                  <receiver
-                      android:exported="false"
-                      android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationReceiver" />
-                  <receiver
-                      android:exported="false"
-                      android:name="com.dexterous.flutterlocalnotifications.ScheduledNotificationBootReceiver">
-                      <intent-filter>
-                          <action android:name="android.intent.action.BOOT_COMPLETED"/>
-                          <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
-                          <action android:name="android.intent.action.QUICKBOOT_POWERON"/>
-                          <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
-                      </intent-filter>
-                  </receiver>
-              """
-              text = text.replace(
-                  "</application>",
-                  receivers + "\n    </application>",
-                  1,
-              )
-
-          manifest.write_text(text, encoding="utf-8")
-
-          if gradle_kts.exists():
-              g = gradle_kts.read_text(encoding="utf-8")
-              g = g.replace("JavaVersion.VERSION_11", "JavaVersion.VERSION_17")
-              g = g.replace("JavaVersion.VERSION_1_8", "JavaVersion.VERSION_17")
-
-              if "isCoreLibraryDesugaringEnabled" not in g:
-                  g = g.replace(
-                      "compileOptions {",
-                      "compileOptions {\n        isCoreLibraryDesugaringEnabled = true",
-                      1,
-                  )
-
-              dep = 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")'
-              if dep not in g:
-                  if "\ndependencies {" in g:
-                      g = g.replace(
-                          "\ndependencies {",
-                          "\ndependencies {\n    " + dep,
-                          1,
-                      )
-                  else:
-                      g += "\n\ndependencies {\n    " + dep + "\n}\n"
-
-              gradle_kts.write_text(g, encoding="utf-8")
-
-          elif gradle_groovy.exists():
-              g = gradle_groovy.read_text(encoding="utf-8")
-              g = g.replace("JavaVersion.VERSION_11", "JavaVersion.VERSION_17")
-              g = g.replace("JavaVersion.VERSION_1_8", "JavaVersion.VERSION_17")
-
-              if "coreLibraryDesugaringEnabled" not in g:
-                  g = g.replace(
-                      "compileOptions {",
-                      "compileOptions {\n        coreLibraryDesugaringEnabled true",
-                      1,
-                  )
-
-              dep = "coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'"
-              if dep not in g:
-                  if "\ndependencies {" in g:
-                      g = g.replace(
-                          "\ndependencies {",
-                          "\ndependencies {\n    " + dep,
-                          1,
-                      )
-                  else:
-                      g += "\n\ndependencies {\n    " + dep + "\n}\n"
-
-              gradle_groovy.write_text(g, encoding="utf-8")
-          else:
-              raise SystemExit("android/app Gradle fayli topilmadi")
-
-          print("Android notification configuration completed.")
-          PY
-
-      - name: Install dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$APP_DIR"
-          flutter pub get
-
-      - name: Run tests
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$APP_DIR"
-          flutter test
-
-      - name: Analyze
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$APP_DIR"
-          flutter analyze --no-fatal-infos --no-fatal-warnings
+      - name: Run Android lint
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        run: gradle --no-daemon --stacktrace lintDebug
 
       - name: Build debug APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$APP_DIR"
-          flutter build apk --debug
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        run: gradle --no-daemon --stacktrace assembleDebug
 
-          APK="$APP_DIR/build/app/outputs/flutter-apk/app-debug.apk"
-          test -f "$APK" || { echo "APK topilmadi"; exit 1; }
-
-          cp "$APK" "$GITHUB_WORKSPACE/soz-yodlash-v1.1.3-debug.apk"
-
-      - name: Upload APK
+      - name: Upload app-debug.apk
         uses: actions/upload-artifact@v4
         with:
-          name: soz-yodlash-v1.1.3-debug-apk
-          path: soz-yodlash-v1.1.3-debug.apk
+          name: Memora-0.4.0-debug-apk
+          path: ${{ steps.source.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
