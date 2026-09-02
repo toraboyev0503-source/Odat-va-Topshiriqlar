@@ -29,24 +29,19 @@ jobs:
           fi
 
           # Prefer the current Memora source archive, then fall back to any ZIP.
-          ZIP_FILE="$(find . -type f -name 'Memora-0.5.1-source-buildfix2.zip' ! -path './.git/*' -print -quit || true)"
+          ZIP_FILE="$(find . -type f -name 'Memora-0.5.2-source.zip' ! -path './.git/*' -print -quit || true)"
           if [[ -z "$ZIP_FILE" ]]; then
             ZIP_FILE="$(find . -type f -iname '*.zip' ! -path './.git/*' -print -quit || true)"
           fi
 
           if [[ -z "$ZIP_FILE" ]]; then
-            echo "::error::No Android project or source ZIP was found in the repository. Upload Memora-0.5.1-source-buildfix2.zip to the repository and rerun this workflow."
+            echo "::error::No Android project or source ZIP was found in the repository. Upload Memora-0.5.2-source.zip to the repository and rerun this workflow."
             exit 1
           fi
 
           echo "Using source ZIP: $ZIP_FILE"
-          echo "Source archive details:"
-          ls -lh "$ZIP_FILE"
-          sha256sum "$ZIP_FILE" || true
-
-          if ! unzip -t "$ZIP_FILE" >/tmp/memora-unzip-test.txt 2>&1; then
-            cat /tmp/memora-unzip-test.txt
-            echo "::error::The uploaded source ZIP is damaged or incomplete. Delete it from the repository and upload a fresh copy."
+          if ! unzip -tq "$ZIP_FILE" >/dev/null; then
+            echo "::error::The uploaded source ZIP is damaged or incomplete. Re-upload Memora-0.5.2-source.zip."
             exit 1
           fi
 
@@ -100,8 +95,7 @@ jobs:
       - name: Upload app-debug.apk
         uses: actions/upload-artifact@v4
         with:
-          name: Memora-0.5.1-debug-apk
+          name: Memora-0.5.2-debug-apk
           path: ${{ steps.source.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
- 
