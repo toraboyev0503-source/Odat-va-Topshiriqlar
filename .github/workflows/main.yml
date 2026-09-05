@@ -1,14 +1,17 @@
-name: Memora 0.9.2 Android Build
+name: Memora Universal Debug Build v3
 
-on:
+"on":
   workflow_dispatch:
   push:
+    branches:
+      - main
+      - master
 
 permissions:
   contents: read
 
 concurrency:
-  group: memora-build-${{ github.ref }}
+  group: memora-debug-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -20,24 +23,46 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Show workflow revision
+        shell: bash
+        run: |
+          echo "WORKFLOW_REVISION=2026-09-05-universal-v3"
+          echo "Commit: $GITHUB_SHA"
+          echo "Repository root files:"
+          find "$GITHUB_WORKSPACE" -maxdepth 2 -type f -printf '%P\n' | sort
+
       - name: Locate or unpack Android source
         id: source
         shell: bash
         run: |
           set -euo pipefail
 
-          if [[ -f settings.gradle.kts && -d app ]]; then
+          # If Android project is committed directly, use it.
+          if [[ -f "$GITHUB_WORKSPACE/settings.gradle.kts" && -d "$GITHUB_WORKSPACE/app" ]]; then
             echo "project_dir=$GITHUB_WORKSPACE" >> "$GITHUB_OUTPUT"
+            echo "source_label=repository-source" >> "$GITHUB_OUTPUT"
+            echo "Using Android source directly from repository."
             exit 0
           fi
 
-          archive="$(find "$GITHUB_WORKSPACE" -maxdepth 2 -type f -name 'Memora-0.9.2-source.zip' -print -quit)"
-          if [[ -z "$archive" ]]; then
-            echo "::error::Memora-0.9.2-source.zip topilmadi. ZIP faylni repository root qismiga yuklang."
+          # Otherwise automatically choose the newest Memora source ZIP.
+          mapfile -t archives < <(
+            find "$GITHUB_WORKSPACE" -maxdepth 1 -type f -name 'Memora-*-source.zip' -print | sort -V
+          )
+
+          if (( ${#archives[@]} == 0 )); then
+            echo "::error::Memora-*-source.zip topilmadi. Source ZIP repository root qismida turishi kerak."
             exit 1
           fi
 
-          echo "Using source archive: $archive"
+          archive="${archives[${#archives[@]}-1]}"
+          base="$(basename "$archive")"
+          label="${base%-source.zip}"
+
+          echo "Available source ZIP files:"
+          printf '  %s\n' "${archives[@]##*/}"
+          echo "Selected: $base"
+
           unzip -tq "$archive" >/dev/null
 
           work="$RUNNER_TEMP/memora-source"
@@ -53,6 +78,7 @@ jobs:
 
           project_dir="$(dirname "$settings")"
           echo "project_dir=$project_dir" >> "$GITHUB_OUTPUT"
+          echo "source_label=$label" >> "$GITHUB_OUTPUT"
           echo "Android project: $project_dir"
 
       - name: Set up JDK 17
@@ -61,7 +87,7 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Gradle cache
+      - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
           validate-wrappers: false
@@ -79,11 +105,11 @@ jobs:
         working-directory: ${{ steps.source.outputs.project_dir }}
         run: chmod +x ./gradlew
 
-      - name: Run unit tests
+      - name: Unit tests
         working-directory: ${{ steps.source.outputs.project_dir }}
         run: ./gradlew --no-daemon --stacktrace testDebugUnitTest
 
-      - name: Run lint
+      - name: Lint
         working-directory: ${{ steps.source.outputs.project_dir }}
         run: ./gradlew --no-daemon --stacktrace lintDebug
 
@@ -94,7 +120,7 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: Memora-0.9.2-debug-apk
+          name: ${{ steps.source.outputs.source_label }}-debug-apk
           path: ${{ steps.source.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
