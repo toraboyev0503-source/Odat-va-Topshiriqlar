@@ -1,113 +1,367 @@
-name: Memora 0.9.2 signed AAB
+name: ToyBola Build + Firebase Deploy
 
 on:
   workflow_dispatch:
+    inputs:
+      bootstrap_admin:
+        description: "Bir martalik bosh administratorni yaratish"
+        required: false
+        default: false
+        type: boolean
+      provision_user:
+        description: "Legacy/favqulodda pilot provision (odatda Admin menyudan yaratiladi)"
+        required: false
+        default: false
+        type: boolean
+      provision_name:
+        description: "Pilot foydalanuvchi ismi"
+        required: false
+        default: ""
+        type: string
+      provision_role:
+        description: "Pilot foydalanuvchi roli"
+        required: false
+        default: "BRIGADIR"
+        type: choice
+        options:
+          - BRIGADIR
+          - QUALITY
+          - TP_NACHALNIK
+          - TP_PLAN
+          - TP_BRIGADIR
+          - TP_SERYO
+          - TP_QABUL
+          - TP_QUALITY
+          - RAHBAR
+          - ADMIN
+      provision_brigades:
+        description: "Brigada ID lar (vergul bilan)"
+        required: false
+        default: ""
+        type: string
+      provision_all_brigades:
+        description: "Barcha brigadalarga ruxsat"
+        required: false
+        default: false
+        type: boolean
   push:
-    tags:
-      - "v*"
+    branches: [ "main", "master" ]
 
 permissions:
   contents: read
 
-concurrency:
-  group: memora-release-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
-  release:
+  android:
+    name: Android test, lint, APK
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Locate Android source
-        id: source
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -f settings.gradle.kts && -d app ]]; then
-            echo "project_dir=$GITHUB_WORKSPACE" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          archive="$(find . -maxdepth 2 -type f -name 'Memora-0.9.2-source.zip' -print -quit)"
-          [[ -n "$archive" ]] || { echo "::error::Android source or Memora-0.9.2-source.zip not found"; exit 1; }
-          unzip -tq "$archive" >/dev/null
-          mkdir -p "$RUNNER_TEMP/memora-source"
-          unzip -q "$archive" -d "$RUNNER_TEMP/memora-source"
-          settings="$(find "$RUNNER_TEMP/memora-source" -type f -name settings.gradle.kts -print -quit)"
-          [[ -n "$settings" ]] || { echo "::error::settings.gradle.kts missing in source ZIP"; exit 1; }
-          echo "project_dir=$(dirname "$settings")" >> "$GITHUB_OUTPUT"
-
-      - name: Set up JDK 17
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android API 36
+      - name: Install Android SDK packages
         shell: bash
-        run: |
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
-
-      - name: Test backend contract
-        working-directory: ${{ steps.source.outputs.project_dir }}/backend
-        run: npm test
-
-      - name: Test Android app
-        working-directory: ${{ steps.source.outputs.project_dir }}
-        run: ./gradlew --no-daemon --stacktrace testDebugUnitTest
-
-      - name: Lint release
-        working-directory: ${{ steps.source.outputs.project_dir }}
-        run: ./gradlew --no-daemon --stacktrace lintRelease
-
-      - name: Validate release configuration
-        shell: bash
-        env:
-          KEYSTORE_BASE64: ${{ secrets.MEMORA_UPLOAD_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.MEMORA_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.MEMORA_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.MEMORA_KEY_PASSWORD }}
-          BILLING_URL: ${{ vars.MEMORA_BILLING_VERIFICATION_URL }}
         run: |
           set -euo pipefail
-          [[ -n "$KEYSTORE_BASE64" ]] || { echo "::error::MEMORA_UPLOAD_KEYSTORE_BASE64 is missing"; exit 1; }
-          [[ -n "$KEYSTORE_PASSWORD" ]] || { echo "::error::MEMORA_KEYSTORE_PASSWORD is missing"; exit 1; }
-          [[ -n "$KEY_ALIAS" ]] || { echo "::error::MEMORA_KEY_ALIAS is missing"; exit 1; }
-          [[ -n "$KEY_PASSWORD" ]] || { echo "::error::MEMORA_KEY_PASSWORD is missing"; exit 1; }
-          [[ "$BILLING_URL" == https://* ]] || { echo "::error::MEMORA_BILLING_VERIFICATION_URL must use HTTPS"; exit 1; }
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/memora-upload.jks"
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Build signed release AAB
-        working-directory: ${{ steps.source.outputs.project_dir }}
-        env:
-          MEMORA_KEYSTORE_PATH: ${{ runner.temp }}/memora-upload.jks
-          MEMORA_KEYSTORE_PASSWORD: ${{ secrets.MEMORA_KEYSTORE_PASSWORD }}
-          MEMORA_KEY_ALIAS: ${{ secrets.MEMORA_KEY_ALIAS }}
-          MEMORA_KEY_PASSWORD: ${{ secrets.MEMORA_KEY_PASSWORD }}
-          MEMORA_BILLING_VERIFICATION_URL: ${{ vars.MEMORA_BILLING_VERIFICATION_URL }}
-        run: ./gradlew --no-daemon --stacktrace bundleRelease
+      - name: Set up Gradle 9.5.0
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: "9.5.0"
 
-      - name: Verify AAB signature
-        working-directory: ${{ steps.source.outputs.project_dir }}
-        run: jarsigner -verify app/build/outputs/bundle/release/app-release.aab
+      - name: Locate Android project
+        id: project
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f settings.gradle.kts ]; then
+            echo "dir=$PWD" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
 
-      - name: Upload release bundle and reports
+          ZIP_FILE=$(find . -maxdepth 3 -type f -name 'ToyBola_Factory_Source_*.zip' | sort -V | tail -n 1)
+          if [ -z "${ZIP_FILE:-}" ]; then
+            echo "Android source ZIP not found." >&2
+            exit 1
+          fi
+
+          unzip -t "$ZIP_FILE" >/dev/null
+          rm -rf _android_source
+          mkdir -p _android_source
+          unzip -q "$ZIP_FILE" -d _android_source
+
+          SETTINGS=$(find _android_source -type f -name settings.gradle.kts | head -n 1)
+          if [ -z "${SETTINGS:-}" ]; then
+            echo "settings.gradle.kts not found inside source ZIP." >&2
+            exit 1
+          fi
+          echo "dir=$(dirname "$SETTINGS")" >> "$GITHUB_OUTPUT"
+
+      - name: Generate Gradle wrapper
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          gradle wrapper --gradle-version 9.5.0
+          chmod +x gradlew
+          ./gradlew --version
+
+      - name: Unit tests
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: ./gradlew test --stacktrace
+
+      - name: Android lint
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: ./gradlew lint --stacktrace
+
+      - name: Build debug APK
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Upload app-debug.apk
         uses: actions/upload-artifact@v4
         with:
-          name: Memora-0.9.2-release
-          path: |
-            ${{ steps.source.outputs.project_dir }}/app/build/outputs/bundle/release/app-release.aab
-            ${{ steps.source.outputs.project_dir }}/app/build/outputs/mapping/release/mapping.txt
-            ${{ steps.source.outputs.project_dir }}/app/build/reports/lint-results-release.html
+          name: ToyBola-0.10.21-debug-apk
+          path: ${{ steps.project.outputs.dir }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 14
+
+  server:
+    name: Firebase rules + functions deploy
+    needs: android
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Locate server project
+        id: project
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -f firebase.json ] && [ -d functions ]; then
+            echo "dir=$PWD" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          ZIP_FILE=$(find . -maxdepth 3 -type f -name 'ToyBola_Factory_Source_*.zip' | sort -V | tail -n 1)
+          if [ -z "${ZIP_FILE:-}" ]; then
+            echo "ToyBola source ZIP not found." >&2
+            exit 1
+          fi
+          unzip -t "$ZIP_FILE" >/dev/null
+          rm -rf _server_source
+          mkdir -p _server_source
+          unzip -q "$ZIP_FILE" -d _server_source
+          FIREBASE_JSON=$(find _server_source -type f -name firebase.json | head -n 1)
+          if [ -z "${FIREBASE_JSON:-}" ]; then
+            echo "firebase.json not found inside source ZIP." >&2
+            exit 1
+          fi
+          echo "dir=$(dirname "$FIREBASE_JSON")" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google Cloud with WIF
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Set up gcloud
+        uses: google-github-actions/setup-gcloud@v3
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate server source
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          npm install --prefix functions --no-audit --no-fund
+          npm run check --prefix functions
+
+      - name: Install Firebase CLI
+        run: npm install --global firebase-tools@15.26.0 --no-audit --no-fund
+
+      - name: Remove retired Windows function if present
+        working-directory: ${{ steps.project.outputs.dir }}
+        env:
+          GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          GCLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+        run: |
+          firebase functions:delete desktopApplyWrites \
+            --region europe-west1 \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --force || true
+
+      - name: Deploy Storage rules
+        working-directory: ${{ steps.project.outputs.dir }}
+        env:
+          GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          GCLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+        run: |
+          # Storage rules use authenticated custom claims refreshed by getMyPolicy.
+          # Scope is only Storage, so it cannot delete Cloud Functions.
+          firebase deploy \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --only storage \
+            --force \
+            --non-interactive
+
+      - name: Deploy Firestore rules, indexes and Functions
+        working-directory: ${{ steps.project.outputs.dir }}
+        env:
+          GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          GCLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+        run: |
+          firebase deploy \
+            --project "${{ vars.GCP_PROJECT_ID }}" \
+            --only firestore:rules,firestore:indexes,functions \
+            --non-interactive
+
+  bootstrap_admin:
+    name: One-time admin bootstrap
+    needs: server
+    if: github.event_name == 'workflow_dispatch' && inputs.bootstrap_admin == true && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Locate server project
+        id: project
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP_FILE=$(find . -maxdepth 3 -type f -name 'ToyBola_Factory_Source_*.zip' | sort -V | tail -n 1)
+          if [ -z "${ZIP_FILE:-}" ]; then
+            echo "ToyBola source ZIP not found." >&2
+            exit 1
+          fi
+          rm -rf _bootstrap_source
+          mkdir -p _bootstrap_source
+          unzip -q "$ZIP_FILE" -d _bootstrap_source
+          FIREBASE_JSON=$(find _bootstrap_source -type f -name firebase.json | head -n 1)
+          if [ -z "${FIREBASE_JSON:-}" ]; then
+            echo "firebase.json not found inside source ZIP." >&2
+            exit 1
+          fi
+          echo "dir=$(dirname "$FIREBASE_JSON")" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google Cloud with WIF
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Admin SDK dependencies
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: npm install --prefix functions --no-audit --no-fund
+
+      - name: Bootstrap administrator
+        working-directory: ${{ steps.project.outputs.dir }}
+        env:
+          GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          GCLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          TOYBOLA_ADMIN_USER_CODE: ${{ secrets.TOYBOLA_ADMIN_USER_CODE }}
+          TOYBOLA_ADMIN_DEVICE_CODE: ${{ secrets.TOYBOLA_ADMIN_DEVICE_CODE }}
+          TOYBOLA_ADMIN_NAME: ${{ secrets.TOYBOLA_ADMIN_NAME }}
+        run: |
+          test -n "$TOYBOLA_ADMIN_USER_CODE" || (echo "TOYBOLA_ADMIN_USER_CODE secret missing" >&2; exit 1)
+          test -n "$TOYBOLA_ADMIN_DEVICE_CODE" || (echo "TOYBOLA_ADMIN_DEVICE_CODE secret missing" >&2; exit 1)
+          node functions/scripts/bootstrap-admin.js
+
+  provision_user:
+    name: Provision pilot user
+    needs: server
+    if: github.event_name == 'workflow_dispatch' && inputs.provision_user == true && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Locate server project
+        id: project
+        shell: bash
+        run: |
+          set -euo pipefail
+          ZIP_FILE=$(find . -maxdepth 3 -type f -name 'ToyBola_Factory_Source_*.zip' | sort -V | tail -n 1)
+          if [ -z "${ZIP_FILE:-}" ]; then
+            echo "ToyBola source ZIP not found." >&2
+            exit 1
+          fi
+          rm -rf _provision_source
+          mkdir -p _provision_source
+          unzip -q "$ZIP_FILE" -d _provision_source
+          FIREBASE_JSON=$(find _provision_source -type f -name firebase.json | head -n 1)
+          if [ -z "${FIREBASE_JSON:-}" ]; then
+            echo "firebase.json not found inside source ZIP." >&2
+            exit 1
+          fi
+          echo "dir=$(dirname "$FIREBASE_JSON")" >> "$GITHUB_OUTPUT"
+
+      - name: Authenticate to Google Cloud with WIF
+        uses: google-github-actions/auth@v3
+        with:
+          workload_identity_provider: ${{ vars.GCP_WIF_PROVIDER }}
+          service_account: ${{ vars.GCP_SERVICE_ACCOUNT }}
+          project_id: ${{ vars.GCP_PROJECT_ID }}
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Admin SDK dependencies
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: npm install --prefix functions --no-audit --no-fund
+
+      - name: Provision user
+        working-directory: ${{ steps.project.outputs.dir }}
+        env:
+          GOOGLE_CLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          GCLOUD_PROJECT: ${{ vars.GCP_PROJECT_ID }}
+          TOYBOLA_USER_CODE: ${{ secrets.TOYBOLA_PROVISION_USER_CODE }}
+          TOYBOLA_DEVICE_CODE: ${{ secrets.TOYBOLA_PROVISION_DEVICE_CODE }}
+          TOYBOLA_DISPLAY_NAME: ${{ inputs.provision_name }}
+          TOYBOLA_ROLE: ${{ inputs.provision_role }}
+          TOYBOLA_BRIGADES: ${{ inputs.provision_brigades }}
+          TOYBOLA_ALL_BRIGADES: ${{ inputs.provision_all_brigades }}
+        run: |
+          test -n "$TOYBOLA_USER_CODE" || (echo "TOYBOLA_PROVISION_USER_CODE secret missing" >&2; exit 1)
+          test -n "$TOYBOLA_DEVICE_CODE" || (echo "TOYBOLA_PROVISION_DEVICE_CODE secret missing" >&2; exit 1)
+          test -n "$TOYBOLA_DISPLAY_NAME" || (echo "provision_name input missing" >&2; exit 1)
+          node functions/scripts/provision-user.js
