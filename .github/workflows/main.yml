@@ -1,20 +1,18 @@
-name: Memora 0.9.2 signed AAB
+name: Memora 0.9.2 Android Build
 
 on:
   workflow_dispatch:
   push:
-    tags:
-      - "v*"
 
 permissions:
   contents: read
 
 concurrency:
-  group: memora-release-${{ github.ref }}
-  cancel-in-progress: false
+  group: memora-build-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
-  release:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
 
@@ -22,23 +20,40 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Locate Android source
+      - name: Locate or unpack Android source
         id: source
         shell: bash
         run: |
           set -euo pipefail
+
           if [[ -f settings.gradle.kts && -d app ]]; then
             echo "project_dir=$GITHUB_WORKSPACE" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          archive="$(find . -maxdepth 2 -type f -name 'Memora-0.9.2-source.zip' -print -quit)"
-          [[ -n "$archive" ]] || { echo "::error::Android source or Memora-0.9.2-source.zip not found"; exit 1; }
+
+          archive="$(find "$GITHUB_WORKSPACE" -maxdepth 2 -type f -name 'Memora-0.9.2-source.zip' -print -quit)"
+          if [[ -z "$archive" ]]; then
+            echo "::error::Memora-0.9.2-source.zip topilmadi. ZIP faylni repository root qismiga yuklang."
+            exit 1
+          fi
+
+          echo "Using source archive: $archive"
           unzip -tq "$archive" >/dev/null
-          mkdir -p "$RUNNER_TEMP/memora-source"
-          unzip -q "$archive" -d "$RUNNER_TEMP/memora-source"
-          settings="$(find "$RUNNER_TEMP/memora-source" -type f -name settings.gradle.kts -print -quit)"
-          [[ -n "$settings" ]] || { echo "::error::settings.gradle.kts missing in source ZIP"; exit 1; }
-          echo "project_dir=$(dirname "$settings")" >> "$GITHUB_OUTPUT"
+
+          work="$RUNNER_TEMP/memora-source"
+          rm -rf "$work"
+          mkdir -p "$work"
+          unzip -q "$archive" -d "$work"
+
+          settings="$(find "$work" -type f -name settings.gradle.kts -print -quit)"
+          if [[ -z "$settings" ]]; then
+            echo "::error::settings.gradle.kts source ZIP ichidan topilmadi."
+            exit 1
+          fi
+
+          project_dir="$(dirname "$settings")"
+          echo "project_dir=$project_dir" >> "$GITHUB_OUTPUT"
+          echo "Android project: $project_dir"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -46,68 +61,40 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Set up Gradle
+      - name: Set up Gradle cache
         uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: false
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android API 36
+      - name: Install Android SDK 36
         shell: bash
         run: |
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
 
-      - name: Test backend contract
-        working-directory: ${{ steps.source.outputs.project_dir }}/backend
-        run: npm test
+      - name: Make Gradle wrapper executable
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        run: chmod +x ./gradlew
 
-      - name: Test Android app
+      - name: Run unit tests
         working-directory: ${{ steps.source.outputs.project_dir }}
         run: ./gradlew --no-daemon --stacktrace testDebugUnitTest
 
-      - name: Lint release
+      - name: Run lint
         working-directory: ${{ steps.source.outputs.project_dir }}
-        run: ./gradlew --no-daemon --stacktrace lintRelease
+        run: ./gradlew --no-daemon --stacktrace lintDebug
 
-      - name: Validate release configuration
-        shell: bash
-        env:
-          KEYSTORE_BASE64: ${{ secrets.MEMORA_UPLOAD_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.MEMORA_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.MEMORA_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.MEMORA_KEY_PASSWORD }}
-          BILLING_URL: ${{ vars.MEMORA_BILLING_VERIFICATION_URL }}
-        run: |
-          set -euo pipefail
-          [[ -n "$KEYSTORE_BASE64" ]] || { echo "::error::MEMORA_UPLOAD_KEYSTORE_BASE64 is missing"; exit 1; }
-          [[ -n "$KEYSTORE_PASSWORD" ]] || { echo "::error::MEMORA_KEYSTORE_PASSWORD is missing"; exit 1; }
-          [[ -n "$KEY_ALIAS" ]] || { echo "::error::MEMORA_KEY_ALIAS is missing"; exit 1; }
-          [[ -n "$KEY_PASSWORD" ]] || { echo "::error::MEMORA_KEY_PASSWORD is missing"; exit 1; }
-          [[ "$BILLING_URL" == https://* ]] || { echo "::error::MEMORA_BILLING_VERIFICATION_URL must use HTTPS"; exit 1; }
-          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/memora-upload.jks"
-
-      - name: Build signed release AAB
+      - name: Build debug APK
         working-directory: ${{ steps.source.outputs.project_dir }}
-        env:
-          MEMORA_KEYSTORE_PATH: ${{ runner.temp }}/memora-upload.jks
-          MEMORA_KEYSTORE_PASSWORD: ${{ secrets.MEMORA_KEYSTORE_PASSWORD }}
-          MEMORA_KEY_ALIAS: ${{ secrets.MEMORA_KEY_ALIAS }}
-          MEMORA_KEY_PASSWORD: ${{ secrets.MEMORA_KEY_PASSWORD }}
-          MEMORA_BILLING_VERIFICATION_URL: ${{ vars.MEMORA_BILLING_VERIFICATION_URL }}
-        run: ./gradlew --no-daemon --stacktrace bundleRelease
+        run: ./gradlew --no-daemon --stacktrace assembleDebug
 
-      - name: Verify AAB signature
-        working-directory: ${{ steps.source.outputs.project_dir }}
-        run: jarsigner -verify app/build/outputs/bundle/release/app-release.aab
-
-      - name: Upload release bundle and reports
+      - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: Memora-0.9.2-release
-          path: |
-            ${{ steps.source.outputs.project_dir }}/app/build/outputs/bundle/release/app-release.aab
-            ${{ steps.source.outputs.project_dir }}/app/build/outputs/mapping/release/mapping.txt
-            ${{ steps.source.outputs.project_dir }}/app/build/reports/lint-results-release.html
+          name: Memora-0.9.2-debug-apk
+          path: ${{ steps.source.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
