@@ -1,4 +1,4 @@
-name: Memora 0.9.3 Android Build
+name: Memora 0.9.2 Android Build
 
 on:
   workflow_dispatch:
@@ -31,9 +31,9 @@ jobs:
             exit 0
           fi
 
-          archive="$(find "$GITHUB_WORKSPACE" -maxdepth 2 -type f -name 'Memora-0.9.3-source.zip' -print -quit)"
+          archive="$(find "$GITHUB_WORKSPACE" -maxdepth 2 -type f -name 'Memora-0.9.2-source.zip' -print -quit)"
           if [[ -z "$archive" ]]; then
-            echo "::error::Memora-0.9.3-source.zip topilmadi. ZIP faylni repository root qismiga yuklang."
+            echo "::error::Memora-0.9.2-source.zip topilmadi. ZIP faylni repository root qismiga yuklang."
             exit 1
           fi
 
@@ -94,7 +94,7 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: Memora-0.9.3-debug-apk
+          name: Memora-0.9.2-debug-apk
           path: ${{ steps.source.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
