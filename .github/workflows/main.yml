@@ -1,11 +1,8 @@
-name: Memora Universal Debug Build v4
+name: Memora Debug Build
 
 "on":
   workflow_dispatch:
   push:
-    branches:
-      - main
-      - master
 
 permissions:
   contents: read
@@ -23,15 +20,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Show workflow revision
-        shell: bash
-        run: |
-          echo "WORKFLOW_REVISION=2026-09-05-universal-v4"
-          echo "Commit: $GITHUB_SHA"
-          echo "Repository root files:"
-          find "$GITHUB_WORKSPACE" -maxdepth 2 -type f -printf '%P\n' | sort
-
-      - name: Locate or unpack Android source
+      - name: Locate Android source
         id: source
         shell: bash
         run: |
@@ -39,8 +28,8 @@ jobs:
 
           if [[ -f "$GITHUB_WORKSPACE/settings.gradle.kts" && -d "$GITHUB_WORKSPACE/app" ]]; then
             echo "project_dir=$GITHUB_WORKSPACE" >> "$GITHUB_OUTPUT"
-            echo "source_label=repository-source" >> "$GITHUB_OUTPUT"
-            echo "Using Android source directly from repository."
+            echo "source_label=Memora-repository" >> "$GITHUB_OUTPUT"
+            echo "Using Android project committed directly in the repository."
             exit 0
           fi
 
@@ -59,10 +48,9 @@ jobs:
 
           echo "Available source ZIP files:"
           printf '  %s\n' "${archives[@]##*/}"
-          echo "Selected: $base"
+          echo "Selected source: $base"
 
           unzip -tq "$archive" >/dev/null
-
           work="$RUNNER_TEMP/memora-source"
           rm -rf "$work"
           mkdir -p "$work"
@@ -85,6 +73,62 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: false
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - name: Make Gradle wrapper executable
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        run: chmod +x ./gradlew
+
+      - name: Unit tests
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        run: ./gradlew --no-daemon --stacktrace testDebugUnitTest
+
+      - name: Lint
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        run: ./gradlew --no-daemon --stacktrace lintDebug
+
+      - name: Build debug APK
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        run: ./gradlew --no-daemon --stacktrace assembleDebug
+
+      - name: Verify stable Memora test signature
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="app/build/outputs/apk/debug/app-debug.apk"
+          expected="772d4a0410f919fd0fe277da5edcf4921025ddec3e31a071d09a79ddc817fd33"
+          actual="$(apksigner verify --print-certs "$apk" \
+            | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' \
+            | head -n 1 \
+            | tr '[:upper:]' '[:lower:]' \
+            | tr -d ':[:space:]')"
+          echo "Debug signing SHA-256: $actual"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "::error::Unexpected debug signing certificate. Update installs would break."
+            exit 1
+          fi
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.source.outputs.source_label }}-debug-apk
+          path: ${{ steps.source.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+          retention-days: 30
+ 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
