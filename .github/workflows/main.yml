@@ -73,6 +73,11 @@ jobs:
           distribution: temurin
           java-version: "17"
 
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
         with:
@@ -84,12 +89,17 @@ jobs:
       - name: Install Android SDK 36
         shell: bash
         run: |
+          set -euo pipefail
           yes | sdkmanager --licenses >/dev/null || true
           sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
 
       - name: Make Gradle wrapper executable
         working-directory: ${{ steps.source.outputs.project_dir }}
         run: chmod +x ./gradlew
+
+      - name: Test billing verifier contract
+        working-directory: ${{ steps.source.outputs.project_dir }}/backend
+        run: npm test
 
       - name: Unit tests
         working-directory: ${{ steps.source.outputs.project_dir }}
