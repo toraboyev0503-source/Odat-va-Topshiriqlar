@@ -1,0 +1,171 @@
+name: Memora Play Release AAB
+
+"on":
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: memora-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Locate Android source
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ -f "$GITHUB_WORKSPACE/settings.gradle.kts" && -d "$GITHUB_WORKSPACE/app" ]]; then
+            echo "project_dir=$GITHUB_WORKSPACE" >> "$GITHUB_OUTPUT"
+            echo "source_label=Memora-repository" >> "$GITHUB_OUTPUT"
+            echo "Using Android project committed directly in the repository."
+            exit 0
+          fi
+
+          mapfile -t archives < <(
+            find "$GITHUB_WORKSPACE" -maxdepth 1 -type f -name 'Memora-*-source.zip' -print | sort -V
+          )
+
+          if (( ${#archives[@]} == 0 )); then
+            echo "::error::Memora-*-source.zip topilmadi. Source ZIP repository root qismida turishi kerak."
+            exit 1
+          fi
+
+          archive="${archives[${#archives[@]}-1]}"
+          base="$(basename "$archive")"
+          label="${base%-source.zip}"
+
+          echo "Available source ZIP files:"
+          printf '  %s\n' "${archives[@]##*/}"
+          echo "Selected source: $base"
+
+          unzip -tq "$archive" >/dev/null
+          work="$RUNNER_TEMP/memora-release-source"
+          rm -rf "$work"
+          mkdir -p "$work"
+          unzip -q "$archive" -d "$work"
+
+          settings="$(find "$work" -type f -name settings.gradle.kts -print -quit)"
+          if [[ -z "$settings" ]]; then
+            echo "::error::settings.gradle.kts source ZIP ichidan topilmadi."
+            exit 1
+          fi
+
+          project_dir="$(dirname "$settings")"
+          echo "project_dir=$project_dir" >> "$GITHUB_OUTPUT"
+          echo "source_label=$label" >> "$GITHUB_OUTPUT"
+          echo "Android project: $project_dir"
+
+      - name: Validate release secrets and variable
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.MEMORA_UPLOAD_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.MEMORA_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.MEMORA_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.MEMORA_KEY_PASSWORD }}
+          BILLING_URL: ${{ vars.MEMORA_BILLING_VERIFICATION_URL }}
+        run: |
+          set -euo pipefail
+          [[ -n "$KEYSTORE_BASE64" ]] || { echo "::error::MEMORA_UPLOAD_KEYSTORE_BASE64 secret is missing"; exit 1; }
+          [[ -n "$KEYSTORE_PASSWORD" ]] || { echo "::error::MEMORA_KEYSTORE_PASSWORD secret is missing"; exit 1; }
+          [[ -n "$KEY_ALIAS" ]] || { echo "::error::MEMORA_KEY_ALIAS secret is missing"; exit 1; }
+          [[ -n "$KEY_PASSWORD" ]] || { echo "::error::MEMORA_KEY_PASSWORD secret is missing"; exit 1; }
+          [[ "$BILLING_URL" == https://* ]] || { echo "::error::MEMORA_BILLING_VERIFICATION_URL must use HTTPS"; exit 1; }
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/memora-upload.jks"
+          [[ -s "$RUNNER_TEMP/memora-upload.jks" ]] || { echo "::error::Decoded upload keystore is empty"; exit 1; }
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          validate-wrappers: false
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          yes | sdkmanager --licenses >/dev/null || true
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+      - name: Make Gradle wrapper executable
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        run: chmod +x ./gradlew
+
+      - name: Verify frozen release identity
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'namespace = "com.memora.app"' app/build.gradle.kts >/dev/null
+          grep -F 'applicationId = "com.memora.app"' app/build.gradle.kts >/dev/null
+          grep -F 'compileSdk = 36' app/build.gradle.kts >/dev/null
+          grep -F 'minSdk = 26' app/build.gradle.kts >/dev/null
+          grep -F 'targetSdk = 36' app/build.gradle.kts >/dev/null
+          grep -F 'applicationIdSuffix = ".debug"' app/build.gradle.kts >/dev/null
+
+      - name: Test billing verifier contract
+        working-directory: ${{ steps.source.outputs.project_dir }}/backend
+        run: npm test
+
+      - name: Release unit tests
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        run: ./gradlew --no-daemon --stacktrace testReleaseUnitTest
+
+      - name: Release lint
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        run: ./gradlew --no-daemon --stacktrace lintRelease
+
+      - name: Build signed Play AAB
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        env:
+          MEMORA_KEYSTORE_PATH: ${{ runner.temp }}/memora-upload.jks
+          MEMORA_KEYSTORE_PASSWORD: ${{ secrets.MEMORA_KEYSTORE_PASSWORD }}
+          MEMORA_KEY_ALIAS: ${{ secrets.MEMORA_KEY_ALIAS }}
+          MEMORA_KEY_PASSWORD: ${{ secrets.MEMORA_KEY_PASSWORD }}
+          MEMORA_BILLING_VERIFICATION_URL: ${{ vars.MEMORA_BILLING_VERIFICATION_URL }}
+        run: ./gradlew --no-daemon --stacktrace bundleRelease
+
+      - name: Verify AAB and create checksum
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          aab="app/build/outputs/bundle/release/app-release.aab"
+          [[ -s "$aab" ]] || { echo "::error::Release AAB was not generated"; exit 1; }
+          jarsigner -verify "$aab"
+          sha256sum "$aab" > "$aab.sha256"
+
+      - name: Upload signed Play bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.source.outputs.source_label }}-play-release
+          path: |
+            ${{ steps.source.outputs.project_dir }}/app/build/outputs/bundle/release/app-release.aab
+            ${{ steps.source.outputs.project_dir }}/app/build/outputs/bundle/release/app-release.aab.sha256
+            ${{ steps.source.outputs.project_dir }}/app/build/outputs/mapping/release/mapping.txt
+            ${{ steps.source.outputs.project_dir }}/app/build/reports/lint-results-release.html
+          if-no-files-found: error
+          retention-days: 30
