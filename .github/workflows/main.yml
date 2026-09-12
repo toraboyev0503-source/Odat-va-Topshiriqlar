@@ -101,61 +101,145 @@ jobs:
         working-directory: ${{ steps.source.outputs.project_dir }}/backend
         run: npm test
 
-      - name: Unit tests
+      # IMPORTANT: this step intentionally does NOT fail immediately. It captures the
+      # compiler output first, extracts exact Kotlin file/line errors, and exposes them
+      # as GitHub annotations and in the job summary.
+      - name: Compile Kotlin and capture exact errors
+        id: kotlin_compile
         working-directory: ${{ steps.source.outputs.project_dir }}
-        run: ./gradlew --no-daemon --stacktrace testDebugUnitTest
+        shell: bash
+        run: |
+          set +e
+          log="$RUNNER_TEMP/memora-compile.log"
+          errors="$RUNNER_TEMP/memora-compiler-errors.txt"
+
+          ./gradlew --no-daemon --console=plain compileDebugKotlin >"$log" 2>&1
+          status=$?
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+
+          python3 - "$log" "$errors" "$GITHUB_STEP_SUMMARY" <<'PY'
+          import pathlib, re, sys
+
+          log_path = pathlib.Path(sys.argv[1])
+          out_path = pathlib.Path(sys.argv[2])
+          summary_path = pathlib.Path(sys.argv[3])
+          text = log_path.read_text(errors="replace")
+          lines = text.splitlines()
+
+          # Kotlin/Gradle compiler formats seen on GitHub runners, e.g.
+          # e: file:///.../Foo.kt:123:45 Message
+          # e: /.../Foo.kt:123:45: Message
+          pat = re.compile(r"^e:\s+(?:file://)?(?P<file>.*?\.kt):(?P<line>\d+):(?P<col>\d+)[: ]\s*(?P<msg>.*)$")
+          generic = re.compile(r"^(?:e:|error:|\[ksp\].*error|.*\.kt:\d+:\d+.*(?:error|Error)).*$", re.I)
+
+          found = []
+          annotations = []
+          for line in lines:
+              m = pat.match(line.strip())
+              if m:
+                  found.append(line)
+                  annotations.append(m.groupdict())
+              elif generic.match(line.strip()):
+                  found.append(line)
+
+          # If Gradle changed formatting, retain useful context around the first compile failure.
+          if not found:
+              markers = [i for i, line in enumerate(lines) if "Compilation error" in line or "compileDebugKotlin" in line and "FAILED" in line]
+              if markers:
+                  i = markers[0]
+                  found = lines[max(0, i-80):min(len(lines), i+40)]
+              else:
+                  found = lines[-140:]
+
+          out_path.write_text("\n".join(found) + "\n")
+
+          with summary_path.open("a", encoding="utf-8") as s:
+              s.write("## Memora Kotlin compiler result\n\n")
+              if annotations:
+                  s.write("Exact Kotlin errors were found below.\n\n```text\n")
+              else:
+                  s.write("No standard `e: file...kt:line:column` line was detected; diagnostic context follows.\n\n```text\n")
+              s.write("\n".join(found[:120]))
+              s.write("\n```\n")
+
+          # Emit native GitHub annotations. Paths outside the workspace are still shown
+          # in the Annotations panel; basename fallback keeps the message readable.
+          for item in annotations[:50]:
+              f = item["file"].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              msg = item["msg"].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
+              print(f'::error file={f},line={item["line"]},col={item["col"]},title=Kotlin compiler error::{msg}')
+          PY
+
+          echo
+          echo "================ EXACT KOTLIN ERRORS ================"
+          cat "$errors"
+          echo "====================================================="
+          echo "Gradle compile exit code: $status"
+
+          # Keep this step green long enough for the diagnostic artifacts to upload.
+          exit 0
+
+      - name: Upload Kotlin diagnostic log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: memora-kotlin-diagnostic
+          path: |
+            ${{ runner.temp }}/memora-compile.log
+            ${{ runner.temp }}/memora-compiler-errors.txt
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Stop on Kotlin compilation error
+        if: steps.kotlin_compile.outputs.status != '0'
+        shell: bash
+        run: |
+          echo "================ EXACT KOTLIN ERRORS ================"
+          cat "$RUNNER_TEMP/memora-compiler-errors.txt" || true
+          echo "====================================================="
+          echo "::error title=Memora Kotlin build failed::Exact compiler error(s) are listed immediately above and in Annotations."
+          exit 1
+
+      - name: Unit tests
+        if: steps.kotlin_compile.outputs.status == '0'
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        run: ./gradlew --no-daemon --console=plain testDebugUnitTest
 
       - name: Lint
+        if: steps.kotlin_compile.outputs.status == '0'
         working-directory: ${{ steps.source.outputs.project_dir }}
-        run: ./gradlew --no-daemon --stacktrace lintDebug
+        run: ./gradlew --no-daemon --console=plain lintDebug
 
       - name: Build debug APK
+        if: steps.kotlin_compile.outputs.status == '0'
         working-directory: ${{ steps.source.outputs.project_dir }}
-        run: ./gradlew --no-daemon --stacktrace assembleDebug
+        run: ./gradlew --no-daemon --console=plain assembleDebug
 
       - name: Verify stable Memora test signature
+        if: steps.kotlin_compile.outputs.status == '0'
         working-directory: ${{ steps.source.outputs.project_dir }}
         shell: bash
         run: |
           set -euo pipefail
-
           apk="app/build/outputs/apk/debug/app-debug.apk"
           expected="772d4a0410f919fd0fe277da5edcf4921025ddec3e31a071d09a79ddc817fd33"
-
           sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
-          if [[ -z "$sdk_root" ]]; then
-            echo "::error::ANDROID_SDK_ROOT/ANDROID_HOME topilmadi."
-            exit 1
-          fi
-
           apksigner_bin="$sdk_root/build-tools/36.0.0/apksigner"
           if [[ ! -x "$apksigner_bin" ]]; then
             apksigner_bin="$(find "$sdk_root/build-tools" -maxdepth 2 -type f -name apksigner -print | sort -V | tail -n 1)"
           fi
-
-          if [[ -z "$apksigner_bin" || ! -x "$apksigner_bin" ]]; then
-            echo "::error::apksigner Android SDK build-tools ichidan topilmadi."
-            find "$sdk_root/build-tools" -maxdepth 2 -type f -name 'apksigner*' -print || true
-            exit 1
-          fi
-
-          echo "Using apksigner: $apksigner_bin"
           actual="$("$apksigner_bin" verify --print-certs "$apk" \
             | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' \
-            | head -n 1 \
-            | tr '[:upper:]' '[:lower:]' \
-            | tr -d ':[:space:]')"
-
+            | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')"
           echo "Debug signing SHA-256: $actual"
-          if [[ "$actual" != "$expected" ]]; then
-            echo "::error::Unexpected debug signing certificate. Update installs would break."
-            exit 1
-          fi
+          [[ "$actual" == "$expected" ]] || { echo "::error::Unexpected debug signing certificate."; exit 1; }
 
       - name: Upload debug APK
+        if: steps.kotlin_compile.outputs.status == '0'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.source.outputs.source_label }}-debug-apk
           path: ${{ steps.source.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
+ 
