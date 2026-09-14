@@ -83,15 +83,67 @@ jobs:
         with:
           validate-wrappers: false
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Install Android SDK 36
+      # GitHub-hosted Ubuntu runners already include an Android SDK. Using it directly
+      # avoids transient/corrupt command-line-tools downloads from setup-android.
+      - name: Prepare Android SDK 36
         shell: bash
         run: |
           set -euo pipefail
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+
+          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          if [[ ! -d "$sdk_root" ]]; then
+            echo "::error::Android SDK root not found: $sdk_root"
+            exit 1
+          fi
+
+          echo "ANDROID_SDK_ROOT=$sdk_root" >> "$GITHUB_ENV"
+          echo "ANDROID_HOME=$sdk_root" >> "$GITHUB_ENV"
+          echo "$sdk_root/platform-tools" >> "$GITHUB_PATH"
+
+          platform_ok=false
+          build_tools_ok=false
+          [[ -d "$sdk_root/platforms/android-36" ]] && platform_ok=true
+          [[ -d "$sdk_root/build-tools/36.0.0" ]] && build_tools_ok=true
+
+          if [[ "$platform_ok" == true && "$build_tools_ok" == true ]]; then
+            echo "Android SDK 36 is already available on the runner."
+            exit 0
+          fi
+
+          sdkmanager_bin=""
+          while IFS= read -r candidate; do
+            if [[ -x "$candidate" ]]; then
+              sdkmanager_bin="$candidate"
+              break
+            fi
+          done < <(find "$sdk_root/cmdline-tools" -type f -name sdkmanager -print 2>/dev/null | sort -Vr)
+
+          if [[ -z "$sdkmanager_bin" ]]; then
+            echo "::error::sdkmanager not found and Android SDK 36 is not fully preinstalled."
+            exit 1
+          fi
+
+          echo "Using sdkmanager: $sdkmanager_bin"
+          yes | "$sdkmanager_bin" --licenses >/dev/null 2>&1 || true
+
+          packages=("platforms;android-36" "build-tools;36.0.0" "platform-tools")
+          success=false
+          for attempt in 1 2 3; do
+            echo "SDK package install attempt $attempt/3"
+            if "$sdkmanager_bin" "${packages[@]}"; then
+              success=true
+              break
+            fi
+            sleep $((attempt * 10))
+          done
+
+          if [[ "$success" != true ]]; then
+            echo "::error::Unable to prepare Android SDK 36 after 3 attempts."
+            exit 1
+          fi
+
+          [[ -d "$sdk_root/platforms/android-36" ]] || { echo "::error::platforms;android-36 is missing."; exit 1; }
+          [[ -d "$sdk_root/build-tools/36.0.0" ]] || { echo "::error::build-tools;36.0.0 is missing."; exit 1; }
 
       - name: Make Gradle wrapper executable
         working-directory: ${{ steps.source.outputs.project_dir }}
