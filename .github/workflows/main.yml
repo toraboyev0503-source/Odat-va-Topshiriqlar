@@ -149,6 +149,10 @@ jobs:
         working-directory: ${{ steps.source.outputs.project_dir }}
         run: chmod +x ./gradlew
 
+      - name: Validate 13-language reflection pack
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        run: python3 tools/validate_reflections.py
+
       - name: Test billing verifier contract
         working-directory: ${{ steps.source.outputs.project_dir }}/backend
         run: npm test
