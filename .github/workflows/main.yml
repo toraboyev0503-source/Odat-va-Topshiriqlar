@@ -153,6 +153,10 @@ jobs:
         working-directory: ${{ steps.source.outputs.project_dir }}
         run: python3 tools/validate_reflections.py
 
+      - name: Run Memora 0.9.20 regression gate
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        run: python3 tools/regression_0920.py
+
       - name: Test billing verifier contract
         working-directory: ${{ steps.source.outputs.project_dir }}/backend
         run: npm test
