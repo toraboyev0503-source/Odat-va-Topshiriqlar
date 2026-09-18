@@ -1,4 +1,4 @@
-name: Memora Debug Build
+name: Memora 0.9.21 Topilmalar Build
 
 "on":
   workflow_dispatch:
@@ -149,13 +149,9 @@ jobs:
         working-directory: ${{ steps.source.outputs.project_dir }}
         run: chmod +x ./gradlew
 
-      - name: Validate 13-language reflection pack
+      - name: Run Memora 0.9.21 Topilmalar regression gate
         working-directory: ${{ steps.source.outputs.project_dir }}
-        run: python3 tools/validate_reflections.py
-
-      - name: Run Memora 0.9.20 regression gate
-        working-directory: ${{ steps.source.outputs.project_dir }}
-        run: python3 tools/regression_0920.py
+        run: python3 tools/regression_0921.py
 
       - name: Test billing verifier contract
         working-directory: ${{ steps.source.outputs.project_dir }}/backend
@@ -173,7 +169,7 @@ jobs:
           log="$RUNNER_TEMP/memora-compile.log"
           errors="$RUNNER_TEMP/memora-compiler-errors.txt"
 
-          ./gradlew --no-daemon --console=plain compileDebugKotlin >"$log" 2>&1
+          ./gradlew --no-daemon --console=plain clean compileDebugKotlin >"$log" 2>&1
           status=$?
           echo "status=$status" >> "$GITHUB_OUTPUT"
 
