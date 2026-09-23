@@ -1,4 +1,4 @@
-name: Memora 0.9.28 Visual Parity Build
+name: Memora 0.9.29 Locked Landscape Share Build
 
 "on":
   workflow_dispatch:
@@ -149,9 +149,13 @@ jobs:
         working-directory: ${{ steps.source.outputs.project_dir }}
         run: chmod +x ./gradlew
 
-      - name: Run Memora 0.9.28 regression gate
+      - name: Verify locked Topilma landscape share template
         working-directory: ${{ steps.source.outputs.project_dir }}
-        run: python3 tools/regression_0928.py
+        run: python3 tools/verify_share_landscape.py
+
+      - name: Run Memora 0.9.29 regression gate
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        run: python3 tools/regression_0929.py
 
       - name: Test billing verifier contract
         working-directory: ${{ steps.source.outputs.project_dir }}/backend
@@ -298,4 +302,3 @@ jobs:
           path: ${{ steps.source.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
- 
