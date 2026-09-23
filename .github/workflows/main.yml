@@ -1,4 +1,4 @@
-name: Memora 0.9.26 Card Parity + Clean Obsidian Build
+name: Memora 0.9.27 Obsidian Compile Fix Build
 
 "on":
   workflow_dispatch:
@@ -151,7 +151,7 @@ jobs:
 
       - name: Run Memora 0.9.26 regression gate
         working-directory: ${{ steps.source.outputs.project_dir }}
-        run: python3 tools/regression_0926.py
+        run: python3 tools/regression_0927.py
 
       - name: Test billing verifier contract
         working-directory: ${{ steps.source.outputs.project_dir }}/backend
