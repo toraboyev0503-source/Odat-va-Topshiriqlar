@@ -1,4 +1,4 @@
-name: Memora 0.9.23 Obsidian + Topilmalar Build
+name: Memora 0.9.24 Kotlin Fix + Obsidian + Topilmalar Build
 
 "on":
   workflow_dispatch:
@@ -149,9 +149,9 @@ jobs:
         working-directory: ${{ steps.source.outputs.project_dir }}
         run: chmod +x ./gradlew
 
-      - name: Run Memora 0.9.23 regression gate
+      - name: Run Memora 0.9.24 regression gate
         working-directory: ${{ steps.source.outputs.project_dir }}
-        run: python3 tools/regression_0923.py
+        run: python3 tools/regression_0924.py
 
       - name: Test billing verifier contract
         working-directory: ${{ steps.source.outputs.project_dir }}/backend
