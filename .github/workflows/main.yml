@@ -1,4 +1,4 @@
-name: Memora 0.9.24 Kotlin Fix + Obsidian + Topilmalar Build
+name: Memora 0.9.25 OCR Copy + Obsidian + Topilmalar Build
 
 "on":
   workflow_dispatch:
@@ -149,9 +149,9 @@ jobs:
         working-directory: ${{ steps.source.outputs.project_dir }}
         run: chmod +x ./gradlew
 
-      - name: Run Memora 0.9.24 regression gate
+      - name: Run Memora 0.9.25 regression gate
         working-directory: ${{ steps.source.outputs.project_dir }}
-        run: python3 tools/regression_0924.py
+        run: python3 tools/regression_0925.py
 
       - name: Test billing verifier contract
         working-directory: ${{ steps.source.outputs.project_dir }}/backend
@@ -298,3 +298,4 @@ jobs:
           path: ${{ steps.source.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 30
+ 
