@@ -1,4 +1,4 @@
-name: Memora 0.9.27 Obsidian Compile Fix Build
+name: Memora 0.9.28 Visual Parity Build
 
 "on":
   workflow_dispatch:
@@ -149,9 +149,9 @@ jobs:
         working-directory: ${{ steps.source.outputs.project_dir }}
         run: chmod +x ./gradlew
 
-      - name: Run Memora 0.9.26 regression gate
+      - name: Run Memora 0.9.28 regression gate
         working-directory: ${{ steps.source.outputs.project_dir }}
-        run: python3 tools/regression_0927.py
+        run: python3 tools/regression_0928.py
 
       - name: Test billing verifier contract
         working-directory: ${{ steps.source.outputs.project_dir }}/backend
