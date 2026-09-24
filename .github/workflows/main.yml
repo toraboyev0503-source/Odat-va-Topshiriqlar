@@ -1,4 +1,4 @@
-name: Memora 0.9.29 Locked Landscape Share Build
+name: Memora 0.9.30 Canonical Card and OCR Build
 
 "on":
   workflow_dispatch:
@@ -149,13 +149,13 @@ jobs:
         working-directory: ${{ steps.source.outputs.project_dir }}
         run: chmod +x ./gradlew
 
-      - name: Verify locked Topilma landscape share template
+      - name: Verify canonical dynamic Topilma card
         working-directory: ${{ steps.source.outputs.project_dir }}
-        run: python3 tools/verify_share_landscape.py
+        run: python3 tools/verify_topilma_card_0930.py
 
-      - name: Run Memora 0.9.29 regression gate
+      - name: Run Memora 0.9.30 regression gate
         working-directory: ${{ steps.source.outputs.project_dir }}
-        run: python3 tools/regression_0929.py
+        run: python3 tools/regression_0930.py
 
       - name: Test billing verifier contract
         working-directory: ${{ steps.source.outputs.project_dir }}/backend
