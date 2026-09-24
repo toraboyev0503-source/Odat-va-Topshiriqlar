@@ -1,4 +1,4 @@
-name: Memora 0.9.30 Canonical Card and OCR Build
+name: Memora 0.9.31 Approved Icons and Active Background Build
 
 "on":
   workflow_dispatch:
@@ -151,11 +151,15 @@ jobs:
 
       - name: Verify canonical dynamic Topilma card
         working-directory: ${{ steps.source.outputs.project_dir }}
-        run: python3 tools/verify_topilma_card_0930.py
+        run: python3 tools/verify_topilma_card_0931.py
 
-      - name: Run Memora 0.9.30 regression gate
+      - name: Verify frozen Topilma icon assets
         working-directory: ${{ steps.source.outputs.project_dir }}
-        run: python3 tools/regression_0930.py
+        run: python3 tools/verify_topilma_icons_0931.py
+
+      - name: Run Memora 0.9.31 regression gate
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        run: python3 tools/regression_0931.py
 
       - name: Test billing verifier contract
         working-directory: ${{ steps.source.outputs.project_dir }}/backend
