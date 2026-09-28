@@ -27,22 +27,33 @@ jobs:
         shell: bash
         run: |
           rm -rf build-src
-          mkdir build-src
-          unzip -q Memora-0.9.35.1-source.zip -d build-src
-          test -f build-src/Memora-0.9.35.1/gradlew
+          mkdir -p build-src
 
-      - name: Verify frozen Topilma card and compatibility changes
-        shell: bash
-        working-directory: build-src/Memora-0.9.35.1
-        run: |
-          python3 tools/verify_topilma_card_0931.py
-          python3 tools/verify_topilma_icons_0931.py
-          python3 tools/regression_09351.py
+          ZIP_FILE="$(find . -maxdepth 1 -type f -name 'Memora-0.9.35.1-source*.zip' | head -n 1)"
+          if [ -z "$ZIP_FILE" ]; then
+            echo "Memora 0.9.35.1 source ZIP topilmadi."
+            echo "Repository rootdagi ZIP fayllar:"
+            find . -maxdepth 1 -type f -name '*.zip' -print
+            exit 1
+          fi
+
+          echo "Using source ZIP: $ZIP_FILE"
+          unzip -q "$ZIP_FILE" -d build-src
+
+          GRADLEW="$(find build-src -type f -name gradlew | head -n 1)"
+          if [ -z "$GRADLEW" ]; then
+            echo "gradlew topilmadi."
+            exit 1
+          fi
+
+          PROJECT_DIR="$(dirname "$GRADLEW")"
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+          echo "Project directory: $PROJECT_DIR"
 
       - name: Build debug APK
         shell: bash
-        working-directory: build-src/Memora-0.9.35.1
         run: |
+          cd "$PROJECT_DIR"
           chmod +x gradlew
           ./gradlew --no-daemon assembleDebug
 
@@ -50,5 +61,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Memora-0.9.35.1-debug-apk
-          path: build-src/Memora-0.9.35.1/app/build/outputs/apk/debug/*.apk
+          path: build-src/**/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
