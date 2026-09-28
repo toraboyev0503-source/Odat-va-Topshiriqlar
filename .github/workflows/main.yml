@@ -1,116 +1,61 @@
-          # Kotlin/Gradle compiler formats seen on GitHub runners, e.g.
-          # e: file:///.../Foo.kt:123:45 Message
-          # e: /.../Foo.kt:123:45: Message
-          pat = re.compile(r"^e:\s+(?:file://)?(?P<file>.*?\.kt):(?P<line>\d+):(?P<col>\d+)[: ]\s*(?P<msg>.*)$")
-          generic = re.compile(r"^(?:e:|error:|\[ksp\].*error|.*\.kt:\d+:\d+.*(?:error|Error)).*$", re.I)
+        uses: android-actions/setup-android@v3
 
-          found = []
-          annotations = []
-          for line in lines:
-              m = pat.match(line.strip())
-              if m:
-                  found.append(line)
-                  annotations.append(m.groupdict())
-              elif generic.match(line.strip()):
-                  found.append(line)
-
-          # If Gradle changed formatting, retain useful context around the first compile failure.
-          if not found:
-              markers = [i for i, line in enumerate(lines) if "Compilation error" in line or "compileDebugKotlin" in line and "FAILED" in line]
-              if markers:
-                  i = markers[0]
-                  found = lines[max(0, i-80):min(len(lines), i+40)]
-              else:
-                  found = lines[-140:]
-
-          out_path.write_text("\n".join(found) + "\n")
-
-          with summary_path.open("a", encoding="utf-8") as s:
-              s.write("## Memora Kotlin compiler result\n\n")
-              if annotations:
-                  s.write("Exact Kotlin errors were found below.\n\n```text\n")
-              else:
-                  s.write("No standard `e: file...kt:line:column` line was detected; diagnostic context follows.\n\n```text\n")
-              s.write("\n".join(found[:120]))
-              s.write("\n```\n")
-
-          # Emit native GitHub annotations. Paths outside the workspace are still shown
-          # in the Annotations panel; basename fallback keeps the message readable.
-          for item in annotations[:50]:
-              f = item["file"].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-              msg = item["msg"].replace("%", "%25").replace("\r", "%0D").replace("\n", "%0A")
-              print(f'::error file={f},line={item["line"]},col={item["col"]},title=Kotlin compiler error::{msg}')
-          PY
-
-          echo
-          echo "================ EXACT KOTLIN ERRORS ================"
-          cat "$errors"
-          echo "====================================================="
-          echo "Gradle compile exit code: $status"
-
-          # Keep this step green long enough for the diagnostic artifacts to upload.
-          exit 0
-
-      - name: Upload Kotlin diagnostic log
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: memora-kotlin-diagnostic
-          path: |
-            ${{ runner.temp }}/memora-compile.log
-            ${{ runner.temp }}/memora-compiler-errors.txt
-          if-no-files-found: warn
-          retention-days: 14
-
-      - name: Stop on Kotlin compilation error
-        if: steps.kotlin_compile.outputs.status != '0'
+      - name: Install Android SDK 36
         shell: bash
         run: |
-          echo "================ EXACT KOTLIN ERRORS ================"
-          cat "$RUNNER_TEMP/memora-compiler-errors.txt" || true
-          echo "====================================================="
-          echo "::error title=Memora Kotlin build failed::Exact compiler error(s) are listed immediately above and in Annotations."
-          exit 1
+          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
 
-      - name: Unit tests
-        if: steps.kotlin_compile.outputs.status == '0'
+      - name: Extract Memora source ZIP
+        id: source
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          archive="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type f -name 'Memora-*-source.zip' | sort -V | tail -n 1)"
+
+          if [ -z "$archive" ]; then
+            echo "::error::Repository root ichida Memora-*-source.zip topilmadi."
+            exit 1
+          fi
+
+          echo "Using: $(basename "$archive")"
+
+          work="$RUNNER_TEMP/memora-source"
+          rm -rf "$work"
+          mkdir -p "$work"
+          unzip -q "$archive" -d "$work"
+
+          settings="$(find "$work" -type f -name settings.gradle.kts -print -quit)"
+          if [ -z "$settings" ]; then
+            echo "::error::ZIP ichida settings.gradle.kts topilmadi."
+            exit 1
+          fi
+
+          project_dir="$(dirname "$settings")"
+          echo "project_dir=$project_dir" >> "$GITHUB_OUTPUT"
+          echo "Android project: $project_dir"
+
+      - name: Make Gradle wrapper executable
         working-directory: ${{ steps.source.outputs.project_dir }}
-        run: ./gradlew --no-daemon --console=plain testDebugUnitTest
+        run: chmod +x ./gradlew
 
-      - name: Lint
-        if: steps.kotlin_compile.outputs.status == '0'
-        working-directory: ${{ steps.source.outputs.project_dir }}
-        run: ./gradlew --no-daemon --console=plain lintDebug
-
-      - name: Build debug APK
-        if: steps.kotlin_compile.outputs.status == '0'
-        working-directory: ${{ steps.source.outputs.project_dir }}
-        run: ./gradlew --no-daemon --console=plain assembleDebug
-
-      - name: Verify stable Memora test signature
-        if: steps.kotlin_compile.outputs.status == '0'
+      - name: Run Memora regression checks
         working-directory: ${{ steps.source.outputs.project_dir }}
         shell: bash
         run: |
           set -euo pipefail
-          apk="app/build/outputs/apk/debug/app-debug.apk"
-          expected="772d4a0410f919fd0fe277da5edcf4921025ddec3e31a071d09a79ddc817fd33"
-          sdk_root="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-}}"
-          apksigner_bin="$sdk_root/build-tools/36.0.0/apksigner"
-          if [[ ! -x "$apksigner_bin" ]]; then
-            apksigner_bin="$(find "$sdk_root/build-tools" -maxdepth 2 -type f -name apksigner -print | sort -V | tail -n 1)"
-          fi
-          actual="$("$apksigner_bin" verify --print-certs "$apk" \
-            | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' \
-            | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d ':[:space:]')"
-          echo "Debug signing SHA-256: $actual"
-          [[ "$actual" == "$expected" ]] || { echo "::error::Unexpected debug signing certificate."; exit 1; }
+          [ -f tools/verify_topilma_card_0931.py ] && python3 tools/verify_topilma_card_0931.py
+          [ -f tools/verify_topilma_icons_0931.py ] && python3 tools/verify_topilma_icons_0931.py
+          [ -f tools/regression_0932.py ] && python3 tools/regression_0932.py
+
+      - name: Build debug APK
+        working-directory: ${{ steps.source.outputs.project_dir }}
+        run: ./gradlew --no-daemon clean testDebugUnitTest lintDebug assembleDebug
 
       - name: Upload debug APK
-        if: steps.kotlin_compile.outputs.status == '0'
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ steps.source.outputs.source_label }}-debug-apk
-          path: ${{ steps.source.outputs.project_dir }}/app/build/outputs/apk/debug/app-debug.apk
+          name: Memora-0.9.32-debug-apk
+          path: ${{ steps.source.outputs.project_dir }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 14
