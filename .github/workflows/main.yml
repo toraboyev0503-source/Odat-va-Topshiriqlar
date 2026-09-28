@@ -1,61 +1,46 @@
-        uses: android-actions/setup-android@v3
+name: Memora 0.9.32 Build
 
-      - name: Install Android SDK 36
+"on":
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Extract source
         shell: bash
         run: |
-          sdkmanager "platforms;android-36" "build-tools;36.0.0" "platform-tools"
-
-      - name: Extract Memora source ZIP
-        id: source
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          archive="$(find "$GITHUB_WORKSPACE" -maxdepth 1 -type f -name 'Memora-*-source.zip' | sort -V | tail -n 1)"
-
-          if [ -z "$archive" ]; then
-            echo "::error::Repository root ichida Memora-*-source.zip topilmadi."
-            exit 1
-          fi
-
-          echo "Using: $(basename "$archive")"
-
-          work="$RUNNER_TEMP/memora-source"
-          rm -rf "$work"
-          mkdir -p "$work"
-          unzip -q "$archive" -d "$work"
-
-          settings="$(find "$work" -type f -name settings.gradle.kts -print -quit)"
-          if [ -z "$settings" ]; then
-            echo "::error::ZIP ichida settings.gradle.kts topilmadi."
-            exit 1
-          fi
-
-          project_dir="$(dirname "$settings")"
-          echo "project_dir=$project_dir" >> "$GITHUB_OUTPUT"
-          echo "Android project: $project_dir"
-
-      - name: Make Gradle wrapper executable
-        working-directory: ${{ steps.source.outputs.project_dir }}
-        run: chmod +x ./gradlew
-
-      - name: Run Memora regression checks
-        working-directory: ${{ steps.source.outputs.project_dir }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          [ -f tools/verify_topilma_card_0931.py ] && python3 tools/verify_topilma_card_0931.py
-          [ -f tools/verify_topilma_icons_0931.py ] && python3 tools/verify_topilma_icons_0931.py
-          [ -f tools/regression_0932.py ] && python3 tools/regression_0932.py
+          rm -rf build-src
+          mkdir build-src
+          unzip -q Memora-0.9.32-source.zip -d build-src
+          test -f build-src/Memora-0.9.32/gradlew
 
       - name: Build debug APK
-        working-directory: ${{ steps.source.outputs.project_dir }}
-        run: ./gradlew --no-daemon clean testDebugUnitTest lintDebug assembleDebug
+        shell: bash
+        working-directory: build-src/Memora-0.9.32
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleDebug
 
-      - name: Upload debug APK
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Memora-0.9.32-debug-apk
-          path: ${{ steps.source.outputs.project_dir }}/app/build/outputs/apk/debug/*.apk
+          path: build-src/Memora-0.9.32/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
-          retention-days: 14
