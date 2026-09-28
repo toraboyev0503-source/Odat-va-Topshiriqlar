@@ -1,4 +1,4 @@
-name: Memora 0.9.35 Build
+name: Memora 0.9.35 Build Fixed
 
 "on":
   workflow_dispatch:
@@ -28,7 +28,7 @@ jobs:
         run: |
           rm -rf build-src
           mkdir build-src
-          unzip -q Memora-0.9.35-source.zip -d build-src
+          unzip -q Memora-0.9.35-source-fixed.zip -d build-src
           test -f build-src/Memora-0.9.35/gradlew
 
       - name: Verify frozen decisions
@@ -38,6 +38,7 @@ jobs:
           python3 tools/verify_topilma_card_0931.py
           python3 tools/verify_topilma_icons_0931.py
           python3 tools/regression_0935.py
+          grep -q "com.google.mlkit.vision.documentscanner.GmsDocumentScannerOptions" app/src/main/java/com/memora/app/ui/screens/TopilmaOcrCaptureScreen.kt
 
       - name: Build debug APK
         shell: bash
