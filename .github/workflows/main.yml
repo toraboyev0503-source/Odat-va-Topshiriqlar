@@ -1,4 +1,4 @@
-name: Memora 0.9.33 Build
+name: Memora 0.9.34 Build
 
 "on":
   workflow_dispatch:
@@ -28,12 +28,20 @@ jobs:
         run: |
           rm -rf build-src
           mkdir build-src
-          unzip -q Memora-0.9.33-source.zip -d build-src
-          test -f build-src/Memora-0.9.33/gradlew
+          unzip -q Memora-0.9.34-source.zip -d build-src
+          test -f build-src/Memora-0.9.34/gradlew
+
+      - name: Verify frozen decisions
+        shell: bash
+        working-directory: build-src/Memora-0.9.34
+        run: |
+          python3 tools/verify_topilma_card_0931.py
+          python3 tools/verify_topilma_icons_0931.py
+          python3 tools/regression_0934.py
 
       - name: Build debug APK
         shell: bash
-        working-directory: build-src/Memora-0.9.33
+        working-directory: build-src/Memora-0.9.34
         run: |
           chmod +x gradlew
           ./gradlew --no-daemon assembleDebug
@@ -41,6 +49,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Memora-0.9.33-debug-apk
-          path: build-src/Memora-0.9.33/app/build/outputs/apk/debug/*.apk
+          name: Memora-0.9.34-debug-apk
+          path: build-src/Memora-0.9.34/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
