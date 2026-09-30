@@ -1,4 +1,4 @@
-name: Memora 0.9.35.1 Build
+name: Memora 0.9.36 Build
 
 "on":
   workflow_dispatch:
@@ -29,9 +29,9 @@ jobs:
           rm -rf build-src
           mkdir -p build-src
 
-          ZIP_FILE="$(find . -maxdepth 1 -type f -name 'Memora-0.9.35.1-source*.zip' | head -n 1)"
+          ZIP_FILE="$(find . -maxdepth 1 -type f -name 'Memora-0.9.36-source*.zip' | head -n 1)"
           if [ -z "$ZIP_FILE" ]; then
-            echo "Memora 0.9.35.1 source ZIP topilmadi."
+            echo "Memora 0.9.36 source ZIP topilmadi."
             echo "Repository rootdagi ZIP fayllar:"
             find . -maxdepth 1 -type f -name '*.zip' -print
             exit 1
@@ -60,6 +60,6 @@ jobs:
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Memora-0.9.35.1-debug-apk
+          name: Memora-0.9.36-debug-apk
           path: build-src/**/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
