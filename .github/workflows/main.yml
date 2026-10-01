@@ -1,4 +1,4 @@
-name: Memora 0.9.36 Build
+name: Memora 0.9.36 Build Fixed
 
 "on":
   workflow_dispatch:
@@ -29,10 +29,9 @@ jobs:
           rm -rf build-src
           mkdir -p build-src
 
-          ZIP_FILE="$(find . -maxdepth 1 -type f -name 'Memora-0.9.36-source*.zip' | head -n 1)"
+          ZIP_FILE="$(find . -maxdepth 1 -type f -name 'Memora-0.9.36-source-fixed*.zip' | head -n 1)"
           if [ -z "$ZIP_FILE" ]; then
-            echo "Memora 0.9.36 source ZIP topilmadi."
-            echo "Repository rootdagi ZIP fayllar:"
+            echo "Memora 0.9.36 fixed source ZIP topilmadi."
             find . -maxdepth 1 -type f -name '*.zip' -print
             exit 1
           fi
