@@ -21,11 +21,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Locate Memora source code
+        shell: bash
+        run: |
+          if [[ -f tools/regression_0937.py && -f settings.gradle.kts ]]; then
+            echo "PROJECT_DIR=." >> "$GITHUB_ENV"
+            echo "Memora source: repository root"
+          elif [[ -f Memora-0.9.37/tools/regression_0937.py && -f Memora-0.9.37/settings.gradle.kts ]]; then
+            echo "PROJECT_DIR=Memora-0.9.37" >> "$GITHUB_ENV"
+            echo "Memora source: Memora-0.9.37/"
+          else
+            echo "::error title=Memora source files missing::Upload the extracted ZIP CONTENTS, including tools/regression_0937.py and settings.gradle.kts, not the ZIP file alone."
+            echo "Repository entries:"
+            find . -maxdepth 3 -type f | sort | head -70
+            exit 1
+          fi
       - name: JDK 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
       - name: Android SDK
         uses: android-actions/setup-android@v3
         with:
@@ -35,6 +50,7 @@ jobs:
       - name: Gradle cache
         uses: gradle/actions/setup-gradle@v4
       - name: Code and visual regression
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
           python3 tools/regression_0937.py
           python3 tools/verify_topilma_card_0931.py
@@ -44,8 +60,10 @@ jobs:
         with:
           node-version: '22'
       - name: Billing backend tests
-        run: cd backend && npm test
+        working-directory: ${{ env.PROJECT_DIR }}/backend
+        run: npm test
       - name: Compile, unit tests, lint and instrumented-test compilation
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
           chmod +x gradlew
           ./gradlew --no-daemon :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
@@ -53,14 +71,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Memora-0.9.37-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
       - name: Upload schema 8 for reproducible future migration tests
         uses: actions/upload-artifact@v4
         with:
           name: Memora-0.9.37-generated-room-schemas
-          path: app/schemas/com.memora.app.data.local.AppDatabase/*.json
+          path: ${{ env.PROJECT_DIR }}/app/schemas/com.memora.app.data.local.AppDatabase/*.json
           if-no-files-found: error
           retention-days: 14
   android-migration-test:
@@ -69,10 +87,21 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+      - name: Locate Memora source code
+        shell: bash
+        run: |
+          if [[ -f tools/regression_0937.py && -f settings.gradle.kts ]]; then
+            echo "PROJECT_DIR=." >> "$GITHUB_ENV"
+          elif [[ -f Memora-0.9.37/tools/regression_0937.py && -f Memora-0.9.37/settings.gradle.kts ]]; then
+            echo "PROJECT_DIR=Memora-0.9.37" >> "$GITHUB_ENV"
+          else
+            echo "::error title=Memora source files missing::Extract the ZIP and upload its CONTENTS to GitHub, including the tools directory."
+            exit 1
+          fi
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: '17'
       - uses: android-actions/setup-android@v3
         with:
           packages: 'platform-tools'
@@ -84,5 +113,6 @@ jobs:
           target: google_apis
           arch: x86_64
           script: |
+            cd "$PROJECT_DIR"
             chmod +x gradlew
             ./gradlew --no-daemon :app:connectedDebugAndroidTest
