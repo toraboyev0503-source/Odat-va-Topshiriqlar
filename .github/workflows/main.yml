@@ -68,7 +68,7 @@ jobs:
           digest = h.hexdigest()
           print('Verified source files:', len(files), 'tree SHA-256:', digest)
           assert len(files) == 261, f'Unexpected file count: {len(files)}'
-          assert digest == '7e8fffe6849460a3e39e4a05ff52fd9946629c90a2a902571deae955aa7e2ee0', 'Source mismatch'
+          assert digest == 'e4d9c188337cc0eeb8090aec3a5051338e204f1aa8e33d52d75f454a4bcc9b1f', 'Source mismatch'
           PY
           if [[ ! -f Memora_0.9.40_GitHub.zip ]]; then
             (cd "$project_dir" && zip -qr "$GITHUB_WORKSPACE/Memora_0.9.40_GitHub.zip" .)
