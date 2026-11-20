@@ -1,4 +1,4 @@
-name: Memora 0.9.38 Android Build
+name: Memora 0.9.39 Android Build
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       run_android_tests:
-        description: 'Run Room migration tests on Android emulator'
+        description: 'Run Room migration test on Android emulator'
         type: boolean
         required: false
         default: false
@@ -14,53 +14,61 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: memora-0938-${{ github.ref }}
-  cancel-in-progress: false
-
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 50
     steps:
-      - name: Checkout source history
+      - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Reconstruct Memora 0.9.38 ZIP from archived 0.9.37
+      - name: Locate or extract 0.9.39 source
         shell: bash
         run: |
           set -euo pipefail
-          archive=Memora_0.9.38_GitHub.zip
-          if [[ ! -f "$archive" ]]; then
-            echo 'Restoring 0.9.37 from Git history and applying verified 0.9.38 delta'
-            git show 13c6fd299:Memora_0.9.37_GitHub_path_fixed.zip > "$RUNNER_TEMP/memora_0937.zip"
-            echo '61c12f26235c6b5b5100cd302e22cf66415343ea551f342ae83c3711beda78c1  '"$RUNNER_TEMP/memora_0937.zip" | sha256sum -c -
-            mkdir -p "$RUNNER_TEMP/memora_rebuild"
-            unzip -q "$RUNNER_TEMP/memora_0937.zip" -d "$RUNNER_TEMP/memora_rebuild"
-            test -f ci/Memora_0.9.38_delta.b64
-            echo '801cfcbbefaf1fdbcf439d06610aef3d1f7132d7583fda7ae755b2de7b20b594  ci/Memora_0.9.38_delta.b64' | sha256sum -c -
-            base64 -d ci/Memora_0.9.38_delta.b64 | xz -dc | patch --batch -s -p1 -d "$RUNNER_TEMP/memora_rebuild"
-            (cd "$RUNNER_TEMP/memora_rebuild" && zip -qr "$GITHUB_WORKSPACE/$archive" .)
+          if [[ -f Memora_0.9.39_GitHub.zip ]]; then
+            project_dir="$RUNNER_TEMP/memora_0939_source"
+            mkdir -p "$project_dir"
+            unzip -q Memora_0.9.39_GitHub.zip -d "$project_dir"
+            echo 'Source: extracted 0.9.39 ZIP from repository root'
+          elif [[ -f tools/regression_0939.py && -f settings.gradle.kts ]]; then
+            project_dir="$GITHUB_WORKSPACE"
+            echo 'Source: extracted files at repository root'
+          elif [[ -f Memora-0.9.39/tools/regression_0939.py && -f Memora-0.9.39/settings.gradle.kts ]]; then
+            project_dir="$GITHUB_WORKSPACE/Memora-0.9.39"
+            echo 'Source: extracted files in Memora-0.9.39 subfolder'
+          elif [[ -f Memora_0.9.38_GitHub.zip && -f ci/Memora_0.9.39_delta.b64 ]]; then
+            echo 'Restoring verified Memora 0.9.39 sources from Memora 0.9.38 archive and patch'
+            echo 'b153cc3b32b6ace187baae9df6e70b84f8d6ad901ad43fb4953aeb60c4737dac  ci/Memora_0.9.39_delta.b64' | sha256sum -c -
+            project_dir="$RUNNER_TEMP/memora_0939_source"
+            mkdir -p "$project_dir"
+            unzip -q Memora_0.9.38_GitHub.zip -d "$project_dir"
+            base64 -d ci/Memora_0.9.39_delta.b64 | xz -dc | patch --batch -s -p1 -d "$project_dir"
+            test -f "$project_dir/tools/regression_0939.py"
+            ( cd "$project_dir" && zip -qr "$GITHUB_WORKSPACE/Memora_0.9.39_GitHub.zip" . )
+          else
+            echo '::error title=Missing Memora source::Neither 0.9.39 ZIP nor the 0.9.38 ZIP with the 0.9.39 patch was found.'
+            find . -maxdepth 2 -type f -not -path './.git/*' | sort | head -50
+            exit 1
           fi
-          unzip -tq "$archive" | tail -2
-          mkdir -p "$RUNNER_TEMP/memora_0938_source"
-          unzip -q "$archive" -d "$RUNNER_TEMP/memora_0938_source"
-          project_dir="$RUNNER_TEMP/memora_0938_source"
-          test -f "$project_dir/settings.gradle.kts"
-          test -f "$project_dir/tools/regression_0938.py"
-          grep -q 'versionCode = 59' "$project_dir/app/build.gradle.kts"
+          if [[ -f "$project_dir/Memora-0.9.39/settings.gradle.kts" ]]; then
+            project_dir="$project_dir/Memora-0.9.39"
+          fi
+          test -f "$project_dir/settings.gradle.kts" || { echo '::error::settings.gradle.kts missing'; exit 1; }
+          test -f "$project_dir/tools/regression_0939.py" || { echo '::error::regression_0939.py missing'; exit 1; }
+          grep -q 'versionCode = 60' "$project_dir/app/build.gradle.kts" || { echo '::error::Wrong Memora versionCode'; exit 1; }
           echo "PROJECT_DIR=$project_dir" >> "$GITHUB_ENV"
-      - name: Publish full source ZIP in GitHub repository
+      - name: Publish Memora 0.9.39 source ZIP in repository
         shell: bash
         run: |
           set -euo pipefail
-          if ! git ls-files --error-unmatch Memora_0.9.38_GitHub.zip >/dev/null 2>&1; then
+          if ! git ls-files --error-unmatch Memora_0.9.39_GitHub.zip >/dev/null 2>&1; then
             git config user.name 'github-actions[bot]'
             git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add Memora_0.9.38_GitHub.zip
-            git commit -m 'Add Memora 0.9.38 full source ZIP [skip ci]'
-            git push origin HEAD:main || echo '::warning::ZIP generated but repository push was denied; download source artifact instead.'
+            git add Memora_0.9.39_GitHub.zip
+            git commit -m 'Add Memora 0.9.39 full source ZIP [skip ci]'
+            git push origin HEAD:main || echo '::warning::Generated ZIP could not be pushed; build will proceed.'
           fi
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -78,7 +86,7 @@ jobs:
       - name: Code and visual regression
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          python3 tools/regression_0938.py
+          python3 tools/regression_0939.py
           python3 tools/verify_topilma_card_0931.py
           python3 tools/verify_topilma_icons_0931.py
       - name: Node.js 22
@@ -96,17 +104,24 @@ jobs:
       - name: Upload debug APK
         uses: actions/upload-artifact@v4
         with:
-          name: Memora-0.9.38-debug-apk
+          name: Memora-0.9.39-debug-apk
           path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
-      - name: Upload generated source ZIP
+      - name: Upload full source archive
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Memora-0.9.38-source
-          path: Memora_0.9.38_GitHub.zip
+          name: Memora-0.9.39-source
+          path: Memora_0.9.39_GitHub.zip
           if-no-files-found: warn
+          retention-days: 14
+      - name: Upload generated Room schemas
+        uses: actions/upload-artifact@v4
+        with:
+          name: Memora-0.9.39-room-schemas
+          path: ${{ env.PROJECT_DIR }}/app/schemas/com.memora.app.data.local.AppDatabase/*.json
+          if-no-files-found: error
           retention-days: 14
 
   android-migration-test:
@@ -117,19 +132,33 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Restore Android project
+      - name: Locate or extract 0.9.39 source
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -f Memora_0.9.38_GitHub.zip ]]; then
-            unzip -q Memora_0.9.38_GitHub.zip -d "$RUNNER_TEMP/memora_0938_source"
+          if [[ -f Memora_0.9.39_GitHub.zip ]]; then
+            project_dir="$RUNNER_TEMP/memora_0939_source"
+            mkdir -p "$project_dir"
+            unzip -q Memora_0.9.39_GitHub.zip -d "$project_dir"
+          elif [[ -f tools/regression_0939.py && -f settings.gradle.kts ]]; then
+            project_dir="$GITHUB_WORKSPACE"
+          elif [[ -f Memora-0.9.39/settings.gradle.kts ]]; then
+            project_dir="$GITHUB_WORKSPACE/Memora-0.9.39"
+          elif [[ -f Memora_0.9.38_GitHub.zip && -f ci/Memora_0.9.39_delta.b64 ]]; then
+            project_dir="$RUNNER_TEMP/memora_0939_source"
+            mkdir -p "$project_dir"
+            echo 'b153cc3b32b6ace187baae9df6e70b84f8d6ad901ad43fb4953aeb60c4737dac  ci/Memora_0.9.39_delta.b64' | sha256sum -c -
+            unzip -q Memora_0.9.38_GitHub.zip -d "$project_dir"
+            base64 -d ci/Memora_0.9.39_delta.b64 | xz -dc | patch --batch -s -p1 -d "$project_dir"
           else
-            git show 13c6fd299:Memora_0.9.37_GitHub_path_fixed.zip > "$RUNNER_TEMP/memora_0937.zip"
-            mkdir -p "$RUNNER_TEMP/memora_0938_source"
-            unzip -q "$RUNNER_TEMP/memora_0937.zip" -d "$RUNNER_TEMP/memora_0938_source"
-            base64 -d ci/Memora_0.9.38_delta.b64 | xz -dc | patch --batch -s -p1 -d "$RUNNER_TEMP/memora_0938_source"
+            echo '::error::Memora 0.9.39 source not found'
+            exit 1
           fi
-          echo "PROJECT_DIR=$RUNNER_TEMP/memora_0938_source" >> "$GITHUB_ENV"
+          if [[ -f "$project_dir/Memora-0.9.39/settings.gradle.kts" ]]; then
+            project_dir="$project_dir/Memora-0.9.39"
+          fi
+          test -f "$project_dir/settings.gradle.kts"
+          echo "PROJECT_DIR=$project_dir" >> "$GITHUB_ENV"
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
