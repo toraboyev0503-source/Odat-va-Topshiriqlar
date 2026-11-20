@@ -59,16 +59,27 @@ jobs:
           test -f "$project_dir/tools/regression_0939.py" || { echo '::error::regression_0939.py missing'; exit 1; }
           grep -q 'versionCode = 60' "$project_dir/app/build.gradle.kts" || { echo '::error::Wrong Memora versionCode'; exit 1; }
           echo "PROJECT_DIR=$project_dir" >> "$GITHUB_ENV"
-      - name: Publish Memora 0.9.39 source ZIP in repository
+      - name: Correct navigation-tab nullability in source and ZIP
         shell: bash
         run: |
           set -euo pipefail
-          if ! git ls-files --error-unmatch Memora_0.9.39_GitHub.zip >/dev/null 2>&1; then
-            git config user.name 'github-actions[bot]'
-            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-            git add Memora_0.9.39_GitHub.zip
-            git commit -m 'Add Memora 0.9.39 full source ZIP [skip ci]'
-            git push origin HEAD:main || echo '::warning::Generated ZIP could not be pushed; build will proceed.'
+          file="$PROJECT_DIR/app/src/main/java/com/memora/app/ui/MemoraApp.kt"
+          if grep -Fq 'selected = rootTab,' "$file"; then
+            sed -i 's/selected = rootTab,/selected = rootTab ?: RootTab.HOME,/' "$file"
+            rm -f Memora_0.9.39_GitHub.zip
+            ( cd "$PROJECT_DIR" && zip -qr "$GITHUB_WORKSPACE/Memora_0.9.39_GitHub.zip" . )
+          fi
+          grep -Fq 'selected = rootTab ?: RootTab.HOME,' "$file"
+      - name: Publish corrected Memora 0.9.39 source ZIP in repository
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Memora_0.9.39_GitHub.zip
+          if ! git diff --cached --quiet; then
+            git commit -m 'Fix Memora 0.9.39 source ZIP Kotlin nullability [skip ci]'
+            git push origin HEAD:main || echo '::warning::ZIP was corrected but repository push was denied.'
           fi
       - name: Set up Java 17
         uses: actions/setup-java@v4
