@@ -2,7 +2,7 @@ name: Memora 0.9.40 Android Build
 
 on:
   push:
-    branches: [main]
+    branches: [main, memora-0940-build]
   workflow_dispatch:
     inputs:
       run_android_tests:
