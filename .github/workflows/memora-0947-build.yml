@@ -31,6 +31,8 @@ jobs:
           set -euo pipefail
           PROJECT="$RUNNER_TEMP/memora_0947"
           mkdir -p "$PROJECT"
+          # Always reconstruct from immutable 0.9.46 baseline and reviewed delta
+          rm -f Memora_0.9.47_GitHub.zip
           if [[ -f Memora_0.9.47_GitHub.zip ]]; then
             unzip -tq Memora_0.9.47_GitHub.zip
             unzip -q Memora_0.9.47_GitHub.zip -d "$PROJECT"
@@ -63,6 +65,19 @@ jobs:
           src=src.replace(needle,needle+"\n    compileOptions {\n        sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17\n    }",1)
           path.write_text(src)
           PYJAVA
+          # Merge the performance hook into the original lifecycle handler
+          python3 - "$PROJECT/app/src/main/java/com/memora/app/MainActivity.kt" <<'PYMAIN'
+          import pathlib,sys
+          path=pathlib.Path(sys.argv[1])
+          src=path.read_text()
+          duplicate="    override fun onStart() {\n        super.onStart()\n        MemoraPerformance.setForeground(true)\n    }\n\n"
+          assert src.count(duplicate)==1,"Expected redundant performance-only onStart handler"
+          src=src.replace(duplicate,"",1)
+          original="    override fun onStart() {\n        super.onStart()\n"
+          assert src.count(original)==1
+          src=src.replace(original,original+"        MemoraPerformance.setForeground(true)\n",1)
+          path.write_text(src)
+          PYMAIN
           if [[ ! -f Memora_0.9.47_GitHub.zip ]]; then
             (cd "$PROJECT" && zip -qr "$GITHUB_WORKSPACE/Memora_0.9.47_GitHub.zip" .)
           fi
