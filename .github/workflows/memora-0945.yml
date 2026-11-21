@@ -77,7 +77,6 @@ jobs:
           if len(files)!=286 or incorrect or digest!="ccc66bf712b7ce9e303542d55ed78e21dde23b5e8c4955952ffc9fec5ca59f2b":
               sys.exit("Memora 0.9.45 source tree mismatch")
           PY
-     PY
           if [[ ! -f Memora_0.9.45_GitHub.zip ]]; then
             ( cd "$project_dir" && zip -qr "$GITHUB_WORKSPACE/Memora_0.9.45_GitHub.zip" . )
           fi
