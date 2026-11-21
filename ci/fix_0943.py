@@ -46,4 +46,19 @@ fun stableNoteStatusInset(): Dp {
     return with(LocalDensity.current) { statusBarHeightPx.toDp() }
 }"""
 )
-print("0.9.43 compile fix: stable AndroidX status bar insets applied")
+
+replace(
+    "tools/regression_0943.py",
+    "'WindowInsets.statusBarsIgnoringVisibility' in bar_effect and 'WindowInsets.statusBarsIgnoringVisibility' in chrome",
+    "'ViewCompat.getRootWindowInsets(view)' in bar_effect and 'stableNoteStatusInset()' in chrome"
+)
+replace(
+    "tools/regression_0943.py",
+    "'windowInsetsPadding(WindowInsets.statusBarsIgnoringVisibility)' in chrome",
+    "'padding(top = stableNoteStatusInset())' in chrome"
+)
+for suffix in ("*.orig", "*.rej"):
+    for unwanted in root.rglob(suffix):
+        unwanted.unlink()
+
+print("0.9.43: compatibility and regression tests updated")
