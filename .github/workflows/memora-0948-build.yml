@@ -78,6 +78,16 @@ jobs:
           src=src.replace(original,original+"        MemoraPerformance.setForeground(true)\n",1)
           path.write_text(src)
           PYMAIN
+          # Keep historical migration schemas unchanged, export new Room schemas separately
+          python3 - "$PROJECT/app/build.gradle.kts" <<'PYROOM'
+          import pathlib,sys
+          path=pathlib.Path(sys.argv[1])
+          src=path.read_text()
+          old='arg("room.schemaLocation", "$projectDir/schemas")'
+          assert src.count(old)==1
+          src=src.replace(old,'arg("room.schemaLocation", "$projectDir/build/generated-room-schemas")',1)
+          path.write_text(src)
+          PYROOM
           if [[ ! -f Memora_0.9.48_GitHub.zip ]]; then
             (cd "$PROJECT" && zip -qr "$GITHUB_WORKSPACE/Memora_0.9.48_GitHub.zip" .)
           fi
@@ -125,7 +135,7 @@ jobs:
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           chmod +x gradlew
-          ./gradlew --no-daemon --stacktrace \
+          ./gradlew --no-daemon --max-workers=1 --stacktrace \
             :app:testDebugUnitTest :app:lintDebug \
             :app:assembleDebug :app:assemblePerformanceProbe \
             :benchmark:assemble
@@ -153,6 +163,7 @@ jobs:
           name: Memora-0.9.48-test-assets
           path: |
             ${{ env.PROJECT_DIR }}/benchmark/build/outputs/apk/**/*.apk
+            ${{ env.PROJECT_DIR }}/app/build/generated-room-schemas/**/*.json
             ${{ env.PROJECT_DIR }}/app/schemas/**/*.json
             sqlite_0948.jsonl
           if-no-files-found: warn
