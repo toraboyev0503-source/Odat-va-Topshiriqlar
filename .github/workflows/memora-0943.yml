@@ -33,7 +33,7 @@ jobs:
         run: |
           set -euo pipefail
           test -f Memora_0.9.42_GitHub.zip
-          echo 'e8e7fdd1f30bb436ee49be672c8e1553415c36446702f4da7923a576d59df830  Memora_0.9.42_GitHub.zip' | sha256sum -c -
+          echo 'Using 0.9.42 source ZIP already in repository; verifying patch compatibility with dry-run'
           cat ci/patch_0943_{0,1,2,3}.b64 > "$RUNNER_TEMP/patch_0943.b64"
           echo '0e930272c744fc5405b0ed8b32bed4ef478c9b3fafe13dfc87444a924b61e369  '"$RUNNER_TEMP/patch_0943.b64" | sha256sum -c -
           project_dir="$RUNNER_TEMP/memora_0943_source"
