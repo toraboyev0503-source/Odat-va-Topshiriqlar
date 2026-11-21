@@ -53,6 +53,16 @@ jobs:
           assert len(files)==306,f"Missing source files: {len(files)}"
           assert h.hexdigest()=="7844aff3d7209ac2056af5df5e95f1b8c332666ed87d13317c1164a1e3cdda07",f"Checksum mismatch: {h.hexdigest()}"
           PYVERIFY
+          # Align Java target with Kotlin 17 in com.android.test benchmark module
+          python3 - "$PROJECT/benchmark/build.gradle.kts" <<'PYJAVA'
+          import pathlib,sys
+          path=pathlib.Path(sys.argv[1])
+          src=path.read_text()
+          needle="    compileSdk = 36"
+          assert src.count(needle)==1
+          src=src.replace(needle,needle+"\n    compileOptions {\n        sourceCompatibility = JavaVersion.VERSION_17\n        targetCompatibility = JavaVersion.VERSION_17\n    }",1)
+          path.write_text(src)
+          PYJAVA
           if [[ ! -f Memora_0.9.47_GitHub.zip ]]; then
             (cd "$PROJECT" && zip -qr "$GITHUB_WORKSPACE/Memora_0.9.47_GitHub.zip" .)
           fi
