@@ -1,0 +1,46 @@
+name: Memora 0.9.47 Isolated Debug APK
+
+on:
+  push:
+    branches: [memora-0947-apk]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore verified source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/memora"
+          unzip -q Memora_0.9.47_GitHub.zip -d "$RUNNER_TEMP/memora"
+          test -f "$RUNNER_TEMP/memora/settings.gradle.kts"
+          grep -q 'versionCode = 68' "$RUNNER_TEMP/memora/app/build.gradle.kts"
+          echo "PROJECT_DIR=$RUNNER_TEMP/memora" >> "$GITHUB_ENV"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+      - name: Install SDK
+        run: sdkmanager --install 'platforms;android-36' 'build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Compile Debug APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --max-workers=2 --stacktrace :app:assembleDebug
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Memora-0.9.47-debug-apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
