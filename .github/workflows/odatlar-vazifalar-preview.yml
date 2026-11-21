@@ -1,0 +1,90 @@
+name: OdatlarNazorati Vazifalar Preview APK
+on:
+  push:
+    branches:
+      - vazifalar-preview-20261121
+    paths:
+      - 'vazifalar/**'
+      - '.github/workflows/odatlar-vazifalar-preview.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout task module
+        uses: actions/checkout@v4
+
+      - name: Extract supplied source bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tasks
+          unzip -q vazifalar/OdatlarNazorati-Vazifalar-GitHub.zip -d tasks
+          test -f tasks/tools/apply_tasks.py
+          test -f tasks/patch/res/raw/tasks_three_signals.wav
+          python3 -m unittest discover -s tasks/tests -v
+
+      - name: Checkout pinned Loop Habit Tracker source
+        uses: actions/checkout@v4
+        with:
+          repository: iSoron/uhabits
+          ref: 2816b7c3d04b61277dab8765d17420f878241f09
+          path: upstream
+          fetch-depth: 1
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+          log-accepted-android-sdk-licenses: 'false'
+
+      - name: Install Android 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+
+      - name: Apply isolated Vazifalar module
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tasks/tools/apply_tasks.py upstream --safe-preview
+          grep -q 'TasksBridge.wrapHabits' upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/habits/list/ListHabitsActivity.kt
+          grep -q 'applicationIdSuffix = ".tasks.preview"' upstream/uhabits-android/build.gradle.kts
+
+      - name: Build side-by-side Android debug APK
+        working-directory: upstream
+        shell: bash
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --console=plain :uhabits-android:assembleDebug --stacktrace
+
+      - name: Check and stage APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          APK=$(find upstream/uhabits-android/build/outputs/apk/debug -type f -name '*.apk' -print -quit)
+          test -n "$APK"
+          cp "$APK" dist/OdatlarNazorati-Vazifalar-SAFE-PREVIEW.apk
+          test -s dist/OdatlarNazorati-Vazifalar-SAFE-PREVIEW.apk
+          sha256sum dist/*.apk > dist/SHA256SUMS.txt
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: OdatlarNazorati-Vazifalar-SAFE-PREVIEW
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
