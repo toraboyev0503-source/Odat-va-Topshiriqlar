@@ -1,0 +1,208 @@
+name: Memora 0.9.48 Performance Engineering
+
+on:
+  push:
+    branches: [memora-0948-build]
+  workflow_dispatch:
+    inputs:
+      run_emulator_tests:
+        description: 'Run Room migration and UI smoke on Android emulator (not a speed benchmark)'
+        required: false
+        type: boolean
+        default: false
+      run_emulator_macrobenchmark:
+        description: 'Collect exploratory Perfetto traces on emulator (NOT real-device performance results)'
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 85
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract project from GitHub source ZIP
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT="$RUNNER_TEMP/memora_0948"
+          mkdir -p "$PROJECT"
+          if [[ -f Memora_0.9.48_GitHub.zip ]]; then
+            unzip -tq Memora_0.9.48_GitHub.zip
+            unzip -q Memora_0.9.48_GitHub.zip -d "$PROJECT"
+          elif [[ -f Memora_0.9.46_GitHub.zip && -f ci/0948/part00.txt ]]; then
+            unzip -q Memora_0.9.46_GitHub.zip -d "$PROJECT"
+            cat ci/0948/part*.txt | base64 -d | xz -dc | patch -d "$PROJECT" -p1 --batch -s
+          elif [[ -f tools/regression_0948.py && -f settings.gradle.kts ]]; then
+            PROJECT="$GITHUB_WORKSPACE"
+          else
+            echo '::error::Upload Memora_0.9.48_GitHub.zip to repository root or extract the project there.'
+            exit 1
+          fi
+          PROJECT_DIR="$PROJECT" python3 - <<'PYVERIFY'
+          import pathlib,hashlib,os
+          root=pathlib.Path(os.environ["PROJECT_DIR"])
+          files=sorted(p for p in root.rglob("*") if p.is_file())
+          h=hashlib.sha256()
+          for p in files:
+              h.update(p.relative_to(root).as_posix().encode()+b"\\0"+hashlib.sha256(p.read_bytes()).digest())
+          assert len(files)==307,f"Missing source files: {len(files)}"
+          assert h.hexdigest()=="3ea1311eb8269c24b3a384aaa8e704de9065cc0fafdd2b79afc2276f13f90f78",f"Checksum mismatch: {h.hexdigest()}"
+          PYVERIFY
+          if [[ ! -f Memora_0.9.48_GitHub.zip ]]; then
+            (cd "$PROJECT" && zip -qr "$GITHUB_WORKSPACE/Memora_0.9.48_GitHub.zip" .)
+          fi
+          test -f "$PROJECT/tools/regression_0948.py"
+          test -f "$PROJECT/benchmark/build.gradle.kts"
+          test -f "$PROJECT/app/src/performanceProbe/AndroidManifest.xml"
+          echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
+
+      - name: Publish verified source ZIP
+        shell: bash
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add Memora_0.9.48_GitHub.zip
+          if ! git diff --cached --quiet; then
+            git commit -m 'Publish Memora 0.9.48 verified ZIP [skip ci]'
+            git push origin "HEAD:$GITHUB_REF_NAME"
+          fi
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+      - name: Install required Android SDK
+        run: sdkmanager --install 'platforms;android-36' 'build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Previous feature regression + new performance contracts
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          python3 tools/regression_0948.py
+          python3 tools/performance_regression.py
+          python3 tools/benchmark_0946.py > "$GITHUB_WORKSPACE/sqlite_0948.jsonl"
+
+      - name: Billing tests
+        working-directory: ${{ env.PROJECT_DIR }}/backend
+        run: npm test
+
+      - name: Compile unit tests, lint, debug, optimized probe and benchmark module
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace \
+            :app:testDebugUnitTest :app:lintDebug \
+            :app:assembleDebug :app:assemblePerformanceProbe \
+            :benchmark:assemble
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Memora-0.9.48-debug
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload non-debuggable optimized probe APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Memora-0.9.48-performance-probe
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/performanceProbe/*.apk
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload test APKs and synthetic diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Memora-0.9.48-test-assets
+          path: |
+            ${{ env.PROJECT_DIR }}/benchmark/build/outputs/apk/**/*.apk
+            ${{ env.PROJECT_DIR }}/app/schemas/**/*.json
+            sqlite_0948.jsonl
+          if-no-files-found: warn
+          retention-days: 20
+
+  emulator-smoke:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_emulator_tests == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore source
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT="$RUNNER_TEMP/memora_0948"
+          mkdir -p "$PROJECT"
+          unzip -q Memora_0.9.48_GitHub.zip -d "$PROJECT"
+          echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+      - uses: gradle/actions/setup-gradle@v4
+      - uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          script: |
+            cd "$PROJECT_DIR"
+            chmod +x gradlew
+            ./gradlew --no-daemon :app:connectedDebugAndroidTest
+
+  emulator-traces:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_emulator_macrobenchmark == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - name: Restore source
+        shell: bash
+        run: |
+          set -euo pipefail
+          PROJECT="$RUNNER_TEMP/memora_0948"
+          mkdir -p "$PROJECT"
+          unzip -q Memora_0.9.48_GitHub.zip -d "$PROJECT"
+          echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Run exploratory Macrobenchmark and Perfetto trace collection
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          script: |
+            cd "$PROJECT_DIR"
+            chmod +x gradlew
+            ./gradlew --no-daemon :benchmark:connectedPerformanceProbeAndroidTest -Pandroid.testInstrumentationRunnerArguments.androidx.benchmark.suppressErrors=EMULATOR
+      - name: Upload device trace and benchmark outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Memora-0.9.48-emulator-traces-not-speed-proof
+          path: |
+            ${{ env.PROJECT_DIR }}/benchmark/build/outputs/**
+          if-no-files-found: warn
+          retention-days: 14
