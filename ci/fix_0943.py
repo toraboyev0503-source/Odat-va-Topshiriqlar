@@ -6,6 +6,8 @@ root = Path(sys.argv[1])
 def replace(path, before, after):
     p = root / path
     text = p.read_text(encoding="utf-8")
+    if before not in text and "fun stableNoteStatusInset()" in before:
+        before = before.replace("@OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)\n", "")
     if before not in text:
         raise SystemExit(f"Expected expression missing: {path}: {before[:90]}")
     p.write_text(text.replace(before, after), encoding="utf-8")
