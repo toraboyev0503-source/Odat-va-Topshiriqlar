@@ -40,6 +40,7 @@ jobs:
           mkdir -p "$project_dir"
           unzip -q Memora_0.9.42_GitHub.zip -d "$project_dir"
           base64 -d "$RUNNER_TEMP/patch_0943.b64" | xz -dc | patch -d "$project_dir" -p1 --batch -s
+          python3 ci/fix_0943.py "$project_dir"
           test -f "$project_dir/settings.gradle.kts"
           test -f "$project_dir/tools/regression_0943.py"
           grep -q 'versionCode = 64' "$project_dir/app/build.gradle.kts"
@@ -126,6 +127,7 @@ jobs:
           else
             unzip -q Memora_0.9.42_GitHub.zip -d "$project_dir"
             cat ci/patch_0943_{0,1,2,3}.b64 | base64 -d | xz -dc | patch -d "$project_dir" -p1 --batch -s
+            python3 ci/fix_0943.py "$project_dir"
           fi
           echo "PROJECT_DIR=$project_dir" >> "$GITHUB_ENV"
       - uses: actions/setup-java@v4
