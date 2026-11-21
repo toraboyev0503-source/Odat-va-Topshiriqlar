@@ -1,0 +1,151 @@
+name: Memora 0.9.42 Android Build
+
+on:
+  push:
+    branches: [memora-0942-build, main]
+  workflow_dispatch:
+    inputs:
+      run_android_tests:
+        description: Run Room 9 migration tests on Android emulator
+        required: false
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: memora-0942-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 65
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Reconstruct and verify Memora 0.9.42
+        shell: bash
+        run: |
+          set -euo pipefail
+          project_dir="$RUNNER_TEMP/memora-0942"
+          mkdir -p "$project_dir"
+          if [[ -f Memora_0.9.42_GitHub.zip ]]; then
+            echo 'Using full version 0.9.42 archive'
+            unzip -q Memora_0.9.42_GitHub.zip -d "$project_dir"
+          else
+            echo 'Reconstructing from verified 0.9.41 source plus changes'
+            test -f Memora_0.9.41_GitHub.zip
+            unzip -q Memora_0.9.41_GitHub.zip -d "$project_dir"
+            cat ci/0942/{0,1,2,3}.txt | base64 -d | xz -dc | patch --batch -s -p1 -d "$project_dir"
+            cat ci/0942/rest{0,1,2}.txt | base64 -d | xz -dc | patch --batch -s -p1 -d "$project_dir"
+          fi
+          test -f "$project_dir/settings.gradle.kts"
+          test -f "$project_dir/tools/regression_0942.py"
+          test -f "$project_dir/app/src/main/java/com/memora/app/ui/components/NotePaper.kt"
+          grep -q 'versionCode = 63' "$project_dir/app/build.gradle.kts"
+          grep -q 'versionName = "0.9.42"' "$project_dir/app/build.gradle.kts"
+          PROJECT_DIR="$project_dir" python3 - <<'PY'
+          import os,hashlib,pathlib,sys
+          root=pathlib.Path(os.environ["PROJECT_DIR"])
+          files=sorted(p for p in root.rglob("*") if p.is_file())
+          h=hashlib.sha256()
+          for p in files:
+              h.update(p.relative_to(root).as_posix().encode()+b"\0"+hashlib.sha256(p.read_bytes()).digest())
+          digest=h.hexdigest()
+          print("Source file count:",len(files),"SHA-256:",digest)
+          if len(files)!=272 or digest!="6c49b508bc2625bd3fe14bb28e5b6775ed26a517e1efced23345199f6a40f153":
+              sys.exit("Source integrity check failed")
+          PY
+          if [[ ! -f Memora_0.9.42_GitHub.zip ]]; then
+            (cd "$project_dir" && zip -qr "$GITHUB_WORKSPACE/Memora_0.9.42_GitHub.zip" .)
+          fi
+          unzip -tq Memora_0.9.42_GitHub.zip | tail -2
+          echo "PROJECT_DIR=$project_dir" >> "$GITHUB_ENV"
+      - name: Publish 0.9.42 source ZIP to GitHub
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! git ls-files --error-unmatch Memora_0.9.42_GitHub.zip >/dev/null 2>&1; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add Memora_0.9.42_GitHub.zip
+            git commit -m 'Add Memora 0.9.42 full source ZIP [skip ci]'
+            git push origin "HEAD:$GITHUB_REF_NAME" || echo '::warning::Could not publish source ZIP; build continues'
+          fi
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+      - name: Install Android API 36
+        run: sdkmanager --install 'platforms;android-36' 'build-tools;36.0.0'
+      - name: Gradle cache
+        uses: gradle/actions/setup-gradle@v4
+      - name: Static regression
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: python3 tools/regression_0942.py
+      - name: Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Billing tests
+        working-directory: ${{ env.PROJECT_DIR }}/backend
+        run: npm test
+      - name: Kotlin tests, lint, build APK
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --stacktrace :app:testDebugUnitTest :app:lintDebug :app:assembleDebug :app:assembleDebugAndroidTest
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Memora-0.9.42-debug-apk
+          path: ${{ env.PROJECT_DIR }}/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload source ZIP
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Memora-0.9.42-source
+          path: Memora_0.9.42_GitHub.zip
+          if-no-files-found: warn
+          retention-days: 30
+
+  android-migration-test:
+    if: github.event_name == 'workflow_dispatch' && inputs.run_android_tests == true
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - name: Extract 0.9.42 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/memora-0942"
+          unzip -q Memora_0.9.42_GitHub.zip -d "$RUNNER_TEMP/memora-0942"
+          echo "PROJECT_DIR=$RUNNER_TEMP/memora-0942" >> "$GITHUB_ENV"
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Migration tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          script: |
+            cd "$PROJECT_DIR"
+            chmod +x gradlew
+            ./gradlew --no-daemon :app:connectedDebugAndroidTest
