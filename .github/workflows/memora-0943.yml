@@ -91,7 +91,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          (cd "$PROJECT_DIR" && zip -qr "$GITHUB_WORKSPACE/Memora_0.9.43_GitHub.zip" .)
+          (cd "$PROJECT_DIR" && zip -qr "$GITHUB_WORKSPACE/Memora_0.9.43_GitHub.zip" . -x "*/build/*" "*/.gradle/*" "*/node_modules/*" "*/.kotlin/*" "*.orig" "*.rej")
+          test "$(stat -c %s Memora_0.9.43_GitHub.zip)" -lt 95000000
           unzip -tq Memora_0.9.43_GitHub.zip | tail -2
       - name: Upload source ZIP artifact
         uses: actions/upload-artifact@v4
