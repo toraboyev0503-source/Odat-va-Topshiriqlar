@@ -1,10 +1,11 @@
-name: OdatlarNazorati Vazifalar Preview APK
+name: OdatlarNazorati Vazifalar UI v2 Android APK
+
 on:
   push:
     branches:
-      - vazifalar-preview-20261121
+      - vazifalar-ui2-build-20261122
     paths:
-      - 'vazifalar/**'
+      - 'vazifalar-ui2/**'
       - '.github/workflows/odatlar-vazifalar-preview.yml'
   workflow_dispatch:
 
@@ -14,28 +15,45 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 60
+    timeout-minutes: 70
     steps:
-      - name: Checkout task module
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract supplied source bundle
+      - name: Reconstruct verified complete UI v2 source bundle
         shell: bash
         run: |
           set -euo pipefail
+          cat vazifalar-ui2/full.part1.b64 vazifalar-ui2/full.part2.b64 vazifalar-ui2/full.part3.b64 \
+            | tr -d '\r\n' | base64 --decode > /tmp/odatlar-ui2.zip
+          printf 'f33d36bd6e70b905815117abf9d6232ab2e054e97aa76c3f2986dd5e7b904b36  /tmp/odatlar-ui2.zip\n' | sha256sum -c -
           mkdir -p tasks
-          unzip -q vazifalar/OdatlarNazorati-Vazifalar-GitHub.zip -d tasks
-          test -f tasks/tools/apply_tasks.py
-          test -f tasks/patch/res/raw/tasks_three_signals.wav
-          python3 -m unittest discover -s tasks/tests -v
+          unzip -q /tmp/odatlar-ui2.zip -d tasks
+          test -s tasks/patch/kotlin/TasksActivity.kt
+          test -s tasks/patch/res/raw/tasks_three_signals.wav
+          test -s tasks/design/reference/03_asosiy_oyna.png
+          test -s tasks/design/reference/06_vazifa_qoshish_dialogi.png
+          test -s tasks/design/reference/16_oylik_monitoring.png
 
-      - name: Checkout pinned Loop Habit Tracker source
+      - name: Run source/SQL/design contract tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tasks/tests -v
+          python3 -m py_compile tasks/tools/apply_tasks.py
+
+      - name: Checkout pinned Loop Habit Tracker 2.3.1
         uses: actions/checkout@v4
         with:
           repository: iSoron/uhabits
           ref: 2816b7c3d04b61277dab8765d17420f878241f09
           path: upstream
           fetch-depth: 1
+
+      - name: Verify upstream commit
+        shell: bash
+        run: |
+          test "$(git -C upstream rev-parse HEAD)" = "2816b7c3d04b61277dab8765d17420f878241f09"
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -49,42 +67,45 @@ jobs:
           packages: 'platform-tools'
           log-accepted-android-sdk-licenses: 'false'
 
-      - name: Install Android 36
+      - name: Install Android SDK 36
         shell: bash
         run: |
           set -euo pipefail
           sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Apply isolated Vazifalar module
+      - name: Apply UI v2 as separate preview application
         shell: bash
         run: |
           set -euo pipefail
+          HABITS_ROOT=upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/habits/list/ListHabitsRootView.kt
+          sha256sum "$HABITS_ROOT" > /tmp/habits-root-sha256
           python3 tasks/tools/apply_tasks.py upstream --safe-preview
-          grep -q 'TasksBridge.wrapHabits' upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/habits/list/ListHabitsActivity.kt
-          grep -q 'applicationIdSuffix = ".tasks.preview"' upstream/uhabits-android/build.gradle.kts
+          sha256sum -c /tmp/habits-root-sha256
+          grep -Fq 'applicationIdSuffix = ".tasks.ui2.preview"' upstream/uhabits-android/build.gradle.kts
+          grep -Fq 'TasksBridge.wrapHabits' upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/habits/list/ListHabitsActivity.kt
 
-      - name: Build side-by-side Android debug APK
+      - name: Compile Android debug APK
         working-directory: upstream
         shell: bash
         run: |
+          set -euo pipefail
           chmod +x gradlew
           ./gradlew --no-daemon --console=plain :uhabits-android:assembleDebug --stacktrace
 
-      - name: Check and stage APK
+      - name: Package APK and checksum
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p dist
-          APK=$(find upstream/uhabits-android/build/outputs/apk/debug -type f -name '*.apk' -print -quit)
-          test -n "$APK"
-          cp "$APK" dist/OdatlarNazorati-Vazifalar-SAFE-PREVIEW.apk
-          test -s dist/OdatlarNazorati-Vazifalar-SAFE-PREVIEW.apk
-          sha256sum dist/*.apk > dist/SHA256SUMS.txt
+          APK="$(find upstream/uhabits-android/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -type f -print -quit)"
+          test -n "$APK" && test -s "$APK"
+          cp "$APK" dist/OdatlarNazorati-Vazifalar-UI2-SAFE-PREVIEW.apk
+          (cd dist && sha256sum *.apk > SHA256SUMS.txt)
 
-      - name: Upload installable APK
+      - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
-          name: OdatlarNazorati-Vazifalar-SAFE-PREVIEW
+          name: OdatlarNazorati-Vazifalar-UI2-APK
           path: dist/
           if-no-files-found: error
-          retention-days: 30
+          retention-days: 14
