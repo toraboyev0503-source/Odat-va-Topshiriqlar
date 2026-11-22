@@ -26,7 +26,7 @@ jobs:
           set -euo pipefail
           cat vazifalar-ui2/full.part1.b64 vazifalar-ui2/full.part2.b64 vazifalar-ui2/full.part3.b64 \
             | tr -d '\r\n' | base64 --decode > /tmp/odatlar-ui2.zip
-          printf 'f33d36bd6e70b905815117abf9d6232ab2e054e97aa76c3f2986dd5e7b904b36  /tmp/odatlar-ui2.zip\n' | sha256sum -c -
+          printf '64e68b0fe3783aafd3eb9af5038a4e2a9b50b6057cf4981e34ae92d97c80967d  /tmp/odatlar-ui2.zip\n' | sha256sum -c -
           mkdir -p tasks
           unzip -q /tmp/odatlar-ui2.zip -d tasks
           test -s tasks/patch/kotlin/TasksActivity.kt
