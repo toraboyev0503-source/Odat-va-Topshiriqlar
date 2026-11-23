@@ -30,7 +30,7 @@ jobs:
         run: |
           set -euo pipefail
           cat ci/odatlar_phase2.part1.b64 ci/odatlar_phase2.part2.b64 | base64 --decode > /tmp/odat-phase2-source.zip
-          echo 'bae3b6d87f087333413b994eddee1b1f8f5cbce1a69bf4133dcb7eb794c636a8  /tmp/odat-phase2-source.zip' | sha256sum --check
+          echo 'cfc86139fab80b593ca6e8ca57a033765b6b2a57af74c3b1614e5aaf3fcbfc0b  /tmp/odat-phase2-source.zip' | sha256sum --check
           unzip -qo /tmp/odat-phase2-source.zip -d .
           test -s tools/apply_tasks.py
           test -s patch/kotlin/TasksActivity.kt
