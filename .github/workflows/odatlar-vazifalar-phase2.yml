@@ -1,0 +1,155 @@
+name: OdatlarNazorati - Vazifalar Phase 2 (Android)
+
+on:
+  push:
+    branches: [ vazifalar-phase2-20261123-build ]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "safe-preview is installable beside the original; source-check verifies exact monitoring patch"
+        type: choice
+        required: true
+        default: safe-preview
+        options:
+          - safe-preview
+          - integration-source-check
+
+permissions:
+  contents: read
+
+jobs:
+  verify-and-build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    steps:
+      - name: Checkout OdatlarNazorati Tasks UI source
+        uses: actions/checkout@v4
+
+      - name: Restore and verify Phase 1+2 source bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat ci/odatlar_phase2.part1.b64 ci/odatlar_phase2.part2.b64 | base64 --decode > /tmp/odat-phase2-source.zip
+          echo 'bae3b6d87f087333413b994eddee1b1f8f5cbce1a69bf4133dcb7eb794c636a8  /tmp/odat-phase2-source.zip' | sha256sum --check
+          unzip -qo /tmp/odat-phase2-source.zip -d .
+          test -s tools/apply_tasks.py
+          test -s patch/kotlin/TasksActivity.kt
+
+      - name: Validate design and patch contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -v
+          python3 -m py_compile tools/apply_tasks.py
+
+      - name: Checkout pinned Loop Habit Tracker 2.3.1
+        uses: actions/checkout@v4
+        with:
+          repository: iSoron/uhabits
+          ref: 2816b7c3d04b61277dab8765d17420f878241f09
+          path: upstream
+          fetch-depth: 1
+
+      - name: Verify exact upstream revision
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C upstream rev-parse HEAD)" = "2816b7c3d04b61277dab8765d17420f878241f09"
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+          log-accepted-android-sdk-licenses: 'false'
+
+      - name: Install Android SDK platform/build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Optional exact monitoring source gate
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          if [[ "$MODE" == "integration-source-check" ]]; then
+            test -f monitoring-patch/tools/apply_patch.py || {
+              echo '::error::Original M-001..M-018 monitoring patch is missing.'
+              echo '::error::This source package cannot reconstruct it from a compiled APK.'
+              exit 1
+            }
+            python3 monitoring-patch/tools/apply_patch.py upstream
+            grep -R -q 'DailyMonitoringView' upstream/uhabits-android/src/main/java || exit 1
+            grep -R -q 'MonthlyMonitoringDialog' upstream/uhabits-android/src/main/java || exit 1
+            echo '::error::Original signer is not configured in this package. Stop before changing the installed app.'
+            exit 1
+          fi
+
+      - name: Apply final Phase 1+2 Tasks patch and restore Habits monitoring
+        if: ${{ github.event_name == 'push' || inputs.mode == 'safe-preview' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/apply_tasks.py upstream --safe-preview
+          HABITS_ROOT=upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/habits/list/ListHabitsRootView.kt
+          grep -q 'HabitsDailyMonitoringView' "$HABITS_ROOT"
+          grep -q 'habitsMonitoring.refresh()' "$HABITS_ROOT"
+          grep -q 'TaskLanguage.install' upstream/uhabits-android/src/main/java/org/isoron/uhabits/HabitsApplication.kt
+          test -f upstream/uhabits-android/src/main/res/values-uz/strings.xml
+          test -f upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/HabitsMonitoring.kt
+          test -f upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TasksStyle.kt
+          test -f upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TasksActivity.kt
+          test -f upstream/uhabits-android/src/main/res/raw/tasks_three_signals.wav
+          test ! -e upstream/uhabits-android/src/main/java/org/isoron/uhabits/database/migrations/MonitoringMigration.kt
+
+      - name: Compile preview debug APK
+        if: ${{ github.event_name == 'push' || inputs.mode == 'safe-preview' }}
+        working-directory: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --console=plain :uhabits-android:assembleDebug --stacktrace
+
+      - name: Collect APK and patched source
+        if: ${{ github.event_name == 'push' || inputs.mode == 'safe-preview' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          APK="$(find upstream/uhabits-android/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -type f -print -quit)"
+          test -n "$APK" && test -s "$APK"
+          cp "$APK" dist/OdatlarNazorati-Vazifalar-Phase2-SAFE-PREVIEW.apk
+          (
+            cd upstream
+            zip -qr ../dist/OdatlarNazorati-Vazifalar-Phase2-PATCHED-SOURCE.zip . \
+              -x '.git/*' '*/build/*' '.gradle/*' '*/.gradle/*' '*/.kotlin/*'
+          )
+          (cd dist && sha256sum *.apk *.zip > SHA256SUMS.txt)
+
+      - name: Upload APK and checksums
+        if: ${{ github.event_name == 'push' || inputs.mode == 'safe-preview' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: OdatlarNazorati-Vazifalar-Phase2-APK
+          path: |
+            dist/OdatlarNazorati-Vazifalar-Phase2-SAFE-PREVIEW.apk
+            dist/SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload patched source snapshot
+        if: ${{ github.event_name == 'push' || inputs.mode == 'safe-preview' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: OdatlarNazorati-Vazifalar-Phase2-SOURCE
+          path: dist/OdatlarNazorati-Vazifalar-Phase2-PATCHED-SOURCE.zip
+          if-no-files-found: error
+          retention-days: 14
