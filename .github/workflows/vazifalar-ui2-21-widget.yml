@@ -51,8 +51,12 @@ jobs:
         run: |
           set -euo pipefail
           test "$(git -C ui2-base rev-parse HEAD)" = '051fe85aefe32bba6b8af56273f87d13e74e5375'
-          test -s ui2-base/vazifalar-ui2/source.zip.b64
-          tr -d '\r\n' < ui2-base/vazifalar-ui2/source.zip.b64 | base64 -d > /tmp/ui2-original-source.zip
+          test -s ui2-base/vazifalar-ui2/full.part1.b64
+          test -s ui2-base/vazifalar-ui2/full.part2.b64
+          test -s ui2-base/vazifalar-ui2/full.part3.b64
+          cat ui2-base/vazifalar-ui2/full.part1.b64 ui2-base/vazifalar-ui2/full.part2.b64 ui2-base/vazifalar-ui2/full.part3.b64 \
+            | tr -d '\r\n' | base64 --decode > /tmp/ui2-original-source.zip
+          printf 'faa0b86f74c60f1ee2129090319d8d46a0b894b1a6e56f2535260c56f143c7d3  /tmp/ui2-original-source.zip\n' | sha256sum -c -
           unzip -t /tmp/ui2-original-source.zip | tail -n 2
           mkdir -p ui2
           unzip -q /tmp/ui2-original-source.zip -d ui2
@@ -118,6 +122,18 @@ jobs:
           grep -q 'SQLiteOpenHelper(context, "odatlar_tasks.db", null, 5)' "$ROOT/java/org/isoron/uhabits/activities/tasks/TaskEngine.kt"
           grep -q 'TasksStyle' "$ROOT/java/org/isoron/uhabits/activities/tasks/TasksActivity.kt"
           git -C upstream diff --check
+
+      - name: Fix UI2 extended task action dialog import
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TasksActivity.kt')
+          s = p.read_text()
+          old = 'AlertDialog.Builder(this).setTitle(task.title)'
+          assert s.count(old) == 1, 'Expected exactly one extended task dialog'
+          p.write_text(s.replace(old, 'androidx.appcompat.app.AlertDialog.Builder(this).setTitle(task.title)', 1))
+          PY
 
       - name: Verify permanent release key (release only)
         if: ${{ inputs.build_variant == 'signed-release' }}
