@@ -120,6 +120,30 @@ jobs:
           fi
           sha256sum dist/*.apk > dist/SHA256SUMS.txt
 
+      - name: Build safe side-by-side installable debug variant
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('upstream/uhabits-android/build.gradle.kts')
+          s=p.read_text()
+          old='applicationId = "org.isoron.uhabits.tasks.preview"'
+          assert s.count(old)==1
+          p.write_text(s.replace(old,'applicationId = "org.isoron.uhabits.tasks.preview.sandbox"'))
+          manifest=Path('upstream/uhabits-android/src/main/AndroidManifest.xml')
+          m=manifest.read_text().replace('android:label="Vazifalar"','android:label="Vazifalar 2 Sinov"')
+          manifest.write_text(m)
+          PY
+          cd upstream
+          ./gradlew --no-daemon --console=plain :uhabits-android:assembleDebug --stacktrace
+          cd ..
+          APK=$(find upstream/uhabits-android/build/outputs/apk/debug -type f -name '*.apk' -print -quit)
+          test -n "$APK" && test -s "$APK"
+          cp "$APK" dist/Vazifalar-2.0-stage4-sandbox-debug.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs dist/Vazifalar-2.0-stage4-sandbox-debug.apk > dist/SANDBOX_SIGNATURE.txt
+          sha256sum dist/*.apk > dist/SHA256SUMS.txt
+
       - name: Upload APK artifacts
         uses: actions/upload-artifact@v4
         with:
