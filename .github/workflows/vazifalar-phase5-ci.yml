@@ -1,0 +1,130 @@
+name: Vazifalar Phase 5 - Android APK
+
+on:
+  push:
+    branches: [vazifalar-phase5-ci-20261123]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 85
+    steps:
+      - name: Checkout patch and original Phase2 bundle
+        uses: actions/checkout@v4
+
+      - name: Fetch exact upstream Loop Habit Tracker 2.3.1 source
+        uses: actions/checkout@v4
+        with:
+          repository: iSoron/uhabits
+          ref: 2816b7c3d04b61277dab8765d17420f878241f09
+          path: upstream
+          fetch-depth: 1
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+          log-accepted-android-sdk-licenses: 'false'
+
+      - name: Android API 36 and Build Tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Restore original Phase2 base code
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat ci/odatlar_phase2.part1.b64 ci/odatlar_phase2.part2.b64 | base64 --decode > "$RUNNER_TEMP/phase2.zip"
+          echo "cfc86139fab80b593ca6e8ca57a033765b6b2a57af74c3b1614e5aaf3fcbfc0b  $RUNNER_TEMP/phase2.zip" | sha256sum --check
+          unzip -qo "$RUNNER_TEMP/phase2.zip" -d .
+          test -s tools/apply_tasks.py
+          python3 tools/apply_tasks.py upstream --safe-preview
+
+      - name: Restore complete Phase 1-5 source overlay
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode ci/vazifalar_phase5_final_source.b64 > "$RUNNER_TEMP/phase5-final.tar.xz"
+          echo "301789763c6046b47253a725acd07873fe49745e40a00d07645f634b9e2b20ee  $RUNNER_TEMP/phase5-final.tar.xz" | sha256sum --check
+          tar -xJf "$RUNNER_TEMP/phase5-final.tar.xz" -C upstream
+          grep -q 'versionCode = 20306' upstream/uhabits-android/build.gradle.kts
+          grep -q 'applicationIdSuffix = ".tasks.phase2.preview"' upstream/uhabits-android/build.gradle.kts
+          grep -q 'odatlar_tasks.db' upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TaskEngine.kt
+
+      - name: Restore user supplied app artwork
+        shell: bash
+        run: |
+          set -euo pipefail
+          base64 --decode ci/vazifalar_phase5_icon.b64 > "$RUNNER_TEMP/logo.webp"
+          echo "50757ee0bfed23280de336b814dec6f315d5e8e59802f94f4e47241171beaa37  $RUNNER_TEMP/logo.webp" | sha256sum --check
+          python3 -m pip install --quiet pillow
+          python3 ci/generate_phase5_icons.py
+
+      - name: Check Kotlin/XML files before compilation
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          from xml.etree import ElementTree as ET
+          p=Path('upstream/uhabits-android/src/main')
+          for x in [p/'AndroidManifest.xml', *p.glob('res/values*/tasks_*.xml'), *p.glob('res/layout/tasks_widget*.xml'), *p.glob('res/xml/tasks_widget*.xml')]:
+              ET.parse(x)
+          java=p/'java/org/isoron/uhabits/activities/tasks'
+          assert (java/'TaskWidget.kt').exists()
+          assert (java/'TaskReminders.kt').exists()
+          assert (java/'TasksActivity.kt').exists()
+          print('PASS: manifests, widget resources, calendar and reminders source present')
+          PY
+
+      - name: Assemble debug APK
+        shell: bash
+        working-directory: upstream
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon --console=plain :uhabits-android:assembleDebug --stacktrace
+
+      - name: Save compiled APK and metadata
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          APK="$(find upstream/uhabits-android/build/outputs/apk/debug -maxdepth 1 -type f -name '*.apk' -print -quit)"
+          test -n "$APK" && test -s "$APK"
+          cp "$APK" dist/Vazifalar-Phase5-debug.apk
+          {
+            echo "Package: org.isoron.uhabits.tasks.phase2.preview"
+            echo "VersionCode: 20306"
+            echo "Build type: debug"
+            echo "WARNING: This debug APK is not signed with the original installed APK key."
+            echo "It cannot be installed as an update unless the signing cert matches."
+          } > dist/BUILD_INFO.txt
+          (cd dist && sha256sum *.apk > SHA256SUMS.txt)
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vazifalar-Phase5-debug-APK
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Lint and Android test compilation
+        shell: bash
+        working-directory: upstream
+        run: |
+          set -euo pipefail
+          ./gradlew --no-daemon --console=plain :uhabits-android:lintDebug :uhabits-android:assembleDebugAndroidTest --stacktrace
