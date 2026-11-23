@@ -16,6 +16,8 @@ def replace(old,new,amount=1):
 
 replace('import com.google.android.material.timepicker.MaterialTimePicker\n','')
 replace('import com.google.android.material.timepicker.TimeFormat\n','')
+replace('import androidx.appcompat.app.AppCompatActivity\n',
+        'import androidx.appcompat.app.AppCompatActivity\nimport org.isoron.uhabits.R\n')
 replace('addView(label("Vazifalar", 20f, color = t.WHITE)',
         'addView(label("Blocivo", 20f, color = t.WHITE)')
 replace('secondaryBar("Vazifalar sozlamalari"',
