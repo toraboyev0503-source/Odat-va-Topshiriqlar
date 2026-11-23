@@ -57,6 +57,9 @@ jobs:
       - name: Apply full tasks-only and calendar patch
         run: python3 source/tools/apply_phase4.py upstream
 
+      - name: Fix Kotlin compiler errors from first GitHub build
+        run: python3 ci/fix_phase5.py upstream
+
       - name: Compile debug APK
         working-directory: upstream
         run: ./gradlew --no-daemon --console=plain :uhabits-android:assembleDebug --stacktrace
