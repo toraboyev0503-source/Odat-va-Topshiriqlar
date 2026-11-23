@@ -48,7 +48,7 @@ jobs:
           anchor = "    def test_all_three_visual_references_are_in_bundle(self):"
           assert src.count(anchor) == 1
           src = src.replace(anchor,
-              '    @unittest.skip("Design PNGs are in the full source ZIP, omitted from CI transfer")\\n' + anchor)
+              '    @unittest.skip("Design PNGs are in the full source ZIP, omitted from CI transfer")\n' + anchor)
           testfile.write_text(src)
           PY
           python3 -m unittest discover -s tests -v
