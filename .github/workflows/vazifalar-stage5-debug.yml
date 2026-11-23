@@ -1,0 +1,117 @@
+name: Vazifalar Phase5 - Android APK build
+
+on:
+  push:
+    branches:
+      - vazifalar-stage5-build-20261123
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 85
+    steps:
+      - name: Checkout Stage5 payloads
+        uses: actions/checkout@v4
+
+      - name: Restore exact successful Phase2 patched source
+        uses: actions/download-artifact@v4
+        with:
+          name: OdatlarNazorati-Vazifalar-Phase2-SOURCE
+          run-id: 45100494701
+          repository: toraboyev0503-source/Odat-va-Topshiriqlar
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: phase2-source
+
+      - name: Reconstruct Phase5 project
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s phase2-source/OdatlarNazorati-Vazifalar-Phase2-PATCHED-SOURCE.zip
+          mkdir upstream
+          unzip -q phase2-source/OdatlarNazorati-Vazifalar-Phase2-PATCHED-SOURCE.zip -d upstream
+          base64 -d stage5/source_text.tar.xz.b64 | xz -d | tar -xf - -C upstream
+          base64 -d stage5/hourglass_512.webp.b64 > /tmp/phase5-icon.webp
+          python3 -m pip install -q Pillow
+          python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image,ImageOps,ImageDraw
+          base=Path('upstream/uhabits-android/src/main/res')
+          img=Image.open('/tmp/phase5-icon.webp').convert('RGBA')
+          # Preserve the supplied icon and its white-blue gradient across all densities
+          for bucket,pixels in [('mdpi',48),('hdpi',72),('xhdpi',96),('xxhdpi',144),('xxxhdpi',192)]:
+              p=base/('mipmap-'+bucket)
+              p.mkdir(parents=True,exist_ok=True)
+              main=img.resize((pixels,pixels),Image.Resampling.LANCZOS)
+              for name in ('ic_launcher.png','ic_launcher_round.png'):
+                  main.save(p/name,optimize=True)
+              fgpixels=int(pixels*2.25)
+              fg=Image.new('RGBA',(fgpixels,fgpixels),(0,0,0,0))
+              inside=img.resize((int(fgpixels*0.70),int(fgpixels*0.70)),Image.Resampling.LANCZOS)
+              fg.alpha_composite(inside,((fgpixels-inside.width)//2,(fgpixels-inside.height)//2))
+              fg.save(p/'ic_launcher_foreground.png',optimize=True)
+              # Monochrome alpha mask derived from dark-blue marks
+              rgba=fg.load()
+              mono=Image.new('RGBA',fg.size,(0,0,0,0))
+              pix=mono.load()
+              for y in range(fgpixels):
+                  for x in range(fgpixels):
+                      r,g,b,a=rgba[x,y]
+                      visibility=max(0,min(255,int((b-r-9)*12)))
+                      pix[x,y]=(0,0,0,min(a,visibility))
+              mono.save(p/'ic_launcher_monochrome.png',optimize=True)
+          splash=base/'drawable-nodpi'
+          splash.mkdir(parents=True,exist_ok=True)
+          img.resize((256,256),Image.Resampling.LANCZOS).save(splash/'tasks_splash_icon.png',optimize=True)
+          print('PASS: custom icon densities and splash assets generated')
+          PY
+          test -f upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TaskWidget.kt
+          grep -q 'versionCode = 20306' upstream/uhabits-android/build.gradle.kts
+          grep -q 'SQLiteOpenHelper(context, "odatlar_tasks.db", null, 6)' upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TaskEngine.kt
+          chmod +x upstream/gradlew
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+          log-accepted-android-sdk-licenses: 'false'
+
+      - name: Android SDK 36
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Build Android debug APK and instrumented test package
+        working-directory: upstream
+        run: ./gradlew --no-daemon --console=plain :uhabits-android:assembleDebug :uhabits-android:assembleDebugAndroidTest --stacktrace
+
+      - name: Lint
+        working-directory: upstream
+        run: ./gradlew --no-daemon --console=plain :uhabits-android:lintDebug
+
+      - name: Collect build outputs
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p dist
+          find upstream/uhabits-android/build/outputs/apk -type f -name '*.apk' -exec cp {} dist/ \; || true
+          if find dist -name '*.apk' -print -quit | grep -q .; then
+             (cd dist && sha256sum *.apk > SHA256SUMS.txt)
+          fi
+
+      - name: Upload installable debug APK
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vazifalar-Phase5-APK-Candidate
+          path: dist/
+          if-no-files-found: warn
+          retention-days: 21
