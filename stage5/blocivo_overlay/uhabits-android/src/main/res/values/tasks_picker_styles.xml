@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="ThemeOverlay.Blocivo.TimePicker" parent="ThemeOverlay.MaterialComponents.TimePicker">
+        <item name="colorPrimary">#0074E9</item>
+        <item name="colorPrimaryVariant">#0065D7</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="colorSecondary">#009791</item>
+        <item name="colorOnSecondary">#FFFFFF</item>
+        <item name="colorSurface">#FFFFFF</item>
+        <item name="colorOnSurface">#23262C</item>
+        <item name="colorAccent">#0074E9</item>
+        <item name="colorControlActivated">#0074E9</item>
+        <item name="materialTimePickerStyle">@style/Widget.Blocivo.TimePicker</item>
+        <item name="android:fontFamily">sans-serif</item>
+    </style>
+    <style name="Widget.Blocivo.TimePicker" parent="Widget.MaterialComponents.TimePicker">
+        <item name="materialClockStyle">@style/Widget.Blocivo.TimePicker.Clock</item>
+    </style>
+    <style name="Widget.Blocivo.TimePicker.Clock" parent="Widget.MaterialComponents.TimePicker.Clock">
+        <item name="clockFaceBackgroundColor">#E7F2FF</item>
+        <item name="clockHandColor">#0074E9</item>
+        <item name="clockNumberTextColor">@color/tasks_clock_number_text</item>
+    </style>
+    <style name="BlocivoDatePickerTheme" parent="Theme.MaterialComponents.Light.Dialog.Alert">
+        <item name="colorPrimary">#0074E9</item>
+        <item name="colorPrimaryDark">#0065D7</item>
+        <item name="colorAccent">#0074E9</item>
+        <item name="android:colorAccent">#0074E9</item>
+        <item name="android:fontFamily">sans-serif</item>
+    </style>
+</resources>
