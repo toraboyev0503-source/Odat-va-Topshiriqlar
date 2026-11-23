@@ -111,6 +111,16 @@ jobs:
         run: |
           set -euo pipefail
           python3 tools/apply_tasks.py upstream --safe-preview
+          # Fix a Kotlin receiver-shadowing issue found by the Android compiler.
+          python3 - <<'PY'
+          from pathlib import Path
+          source = Path("upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TasksActivity.kt")
+          code = source.read_text()
+          before = "snack?.let { view -> overlay.removeView(view) }"
+          after = "this@TasksActivity.snack?.let { view: View -> this@TasksActivity.overlay.removeView(view) }"
+          assert code.count(before) == 1, "snackbar hotfix anchor changed"
+          source.write_text(code.replace(before, after))
+          PY
           HABITS_ROOT=upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/habits/list/ListHabitsRootView.kt
           grep -q 'HabitsDailyMonitoringView' "$HABITS_ROOT"
           grep -q 'habitsMonitoring.refresh()' "$HABITS_ROOT"
