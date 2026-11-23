@@ -1,0 +1,130 @@
+name: Vazifalar 2.0 - APK build
+
+on:
+  push:
+    branches:
+      - vazifalar-20-final-build-20261123
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 85
+    steps:
+      - name: Checkout build repository
+        uses: actions/checkout@v4
+
+      - name: Extract cumulative stage 1-4 source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p source
+          unzip -q ci/vazifalar-20-ci-patch.zip -d source
+          test -f source/tools/apply_phase4.py
+          test -f source/patch/kotlin/TasksActivity.kt
+
+      - name: Run Python and SQLite regression tests
+        run: python3 -m unittest discover -s source/tests -v
+
+      - name: Checkout exact Loop 2.3.1 source
+        uses: actions/checkout@v4
+        with:
+          repository: iSoron/uhabits
+          ref: 2816b7c3d04b61277dab8765d17420f878241f09
+          path: upstream
+          fetch-depth: 1
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+          log-accepted-android-sdk-licenses: 'false'
+
+      - name: Android API 36
+        run: |
+          set -euo pipefail
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Apply full tasks-only and calendar patch
+        run: python3 source/tools/apply_phase4.py upstream
+
+      - name: Compile debug APK
+        working-directory: upstream
+        run: ./gradlew --no-daemon --console=plain :uhabits-android:assembleDebug --stacktrace
+
+      - name: Copy and verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          APK=$(find upstream/uhabits-android/build/outputs/apk/debug -type f -name '*.apk' -print -quit)
+          test -n "$APK" && test -s "$APK"
+          cp "$APK" dist/Vazifalar-2.0-stage4-debug.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs dist/Vazifalar-2.0-stage4-debug.apk > dist/SIGNATURE.txt
+          sha256sum dist/*.apk > dist/SHA256SUMS.txt
+
+      - name: Configure optional permanent signing
+        shell: bash
+        env:
+          SIGNING_B64: ${{ secrets.TASKS_KEYSTORE_BASE64 }}
+          SIGNING_PASSWORD: ${{ secrets.TASKS_KEYSTORE_PASSWORD }}
+          SIGNING_ALIAS: ${{ secrets.TASKS_KEY_ALIAS }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.TASKS_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$SIGNING_B64" && -n "$SIGNING_PASSWORD" && -n "$SIGNING_ALIAS" && -n "$SIGNING_KEY_PASSWORD" ]]; then
+            printf '%s' "$SIGNING_B64" | base64 --decode > "$GITHUB_WORKSPACE/tasks-release.jks"
+            echo 'TASKS_HAS_SIGNING=true' >> "$GITHUB_ENV"
+          else
+            echo 'TASKS_HAS_SIGNING=false' >> "$GITHUB_ENV"
+            echo 'No permanent signing secrets found: debug APK will be published only.'
+          fi
+
+      - name: Build permanently signed release if credentials exist
+        if: env.TASKS_HAS_SIGNING == 'true'
+        working-directory: upstream
+        env:
+          LOOP_KEY_ALIAS: ${{ secrets.TASKS_KEY_ALIAS }}
+          LOOP_KEY_PASSWORD: ${{ secrets.TASKS_KEY_PASSWORD }}
+          LOOP_KEY_STORE: ${{ github.workspace }}/tasks-release.jks
+          LOOP_STORE_PASSWORD: ${{ secrets.TASKS_KEYSTORE_PASSWORD }}
+        run: ./gradlew --no-daemon --console=plain :uhabits-android:assembleRelease --stacktrace
+
+      - name: Verify optional release
+        if: env.TASKS_HAS_SIGNING == 'true'
+        shell: bash
+        env:
+          EXISTING_CERT: ${{ secrets.TASKS_EXISTING_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          APK=$(find upstream/uhabits-android/build/outputs/apk/release -type f -name '*.apk' -print -quit)
+          test -n "$APK" && test -s "$APK"
+          cp "$APK" dist/Vazifalar-2.0-stage4-release.apk
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --print-certs dist/Vazifalar-2.0-stage4-release.apk > dist/RELEASE_SIGNATURE.txt
+          if [[ -n "$EXISTING_CERT" ]]; then
+            ACTUAL=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' dist/RELEASE_SIGNATURE.txt | head -n1 | tr -d ':' | tr '[:upper:]' '[:lower:]')
+            EXPECTED=$(printf '%s' "$EXISTING_CERT" | tr -d ':' | tr '[:upper:]' '[:lower:]')
+            test "$ACTUAL" = "$EXPECTED" || { echo "::error::Release certificate does not match installed APK"; exit 1; }
+          fi
+          sha256sum dist/*.apk > dist/SHA256SUMS.txt
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vazifalar-2.0-stage4-APK
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove signing key
+        if: always()
+        run: rm -f "$GITHUB_WORKSPACE/tasks-release.jks"
