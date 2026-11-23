@@ -74,10 +74,10 @@ new='''        super.onCreate()
                     "${frame.className}.${frame.methodName}:${frame.lineNumber}"
                 }
                 val line = "${System.currentTimeMillis()} | ${thread.name} | ${throwable.javaClass.name}\\n$trace\\n\\n"
-                openFileOutput("tasks_fatal_crash.log", MODE_APPEND).use { it.write(line.toByteArray()) }
+                openFileOutput("tasks_fatal_crash.log", android.content.Context.MODE_APPEND).use { it.write(line.toByteArray()) }
                 val file = getFileStreamPath("tasks_fatal_crash.log")
                 if (file.length() > 120_000L) {
-                    openFileOutput("tasks_fatal_crash.log", MODE_PRIVATE).use {
+                    openFileOutput("tasks_fatal_crash.log", android.content.Context.MODE_PRIVATE).use {
                         it.write(file.readText().takeLast(60_000).toByteArray())
                     }
                 }
