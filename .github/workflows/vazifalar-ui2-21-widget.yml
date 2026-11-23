@@ -1,0 +1,199 @@
+name: Vazifalar UI2 2.1 — Original UI + Calendar + Home Widget
+
+on:
+  push:
+    branches: [vazifalar-ui2-21-widget-build-20261123]
+  workflow_dispatch:
+    inputs:
+      build_variant:
+        description: 'Which build? debug-preview installs side-by-side; signed-release needs permanent signing secrets.'
+        type: choice
+        required: true
+        default: debug-preview
+        options:
+          - debug-preview
+          - signed-release
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Verify UI2 source and build Android APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout integration build repository
+        uses: actions/checkout@v4
+
+      - name: Reassemble pinned integration ZIP from GitHub chunks
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d ci/ui2-widget-21
+          cat ci/ui2-widget-21/part-*.b64 | tr -d '\r\n' | base64 --decode > /tmp/vazifalar-ui2-21.zip
+          printf '1b7d623f35664bb27198f87aaa88bbc3f3d84dbad12a8c159c45676df6d87e8a  /tmp/vazifalar-ui2-21.zip\n' | sha256sum -c -
+          unzip -t /tmp/vazifalar-ui2-21.zip | tail -n 2
+          unzip -q /tmp/vazifalar-ui2-21.zip -d .
+          test -s tools/integrate_ui2.py
+          test -s patch/kotlin/TasksWidgetProvider.kt
+
+      - name: Checkout immutable November 22 UI2 design source
+        uses: actions/checkout@v4
+        with:
+          repository: toraboyev0503-source/Odat-va-Topshiriqlar
+          ref: 051fe85aefe32bba6b8af56273f87d13e74e5375
+          path: ui2-base
+          fetch-depth: 1
+
+      - name: Reconstruct original UI2 Kotlin source (no design rebuild)
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git -C ui2-base rev-parse HEAD)" = '051fe85aefe32bba6b8af56273f87d13e74e5375'
+          test -s ui2-base/vazifalar-ui2/source.zip.b64
+          tr -d '\r\n' < ui2-base/vazifalar-ui2/source.zip.b64 | base64 -d > /tmp/ui2-original-source.zip
+          unzip -t /tmp/ui2-original-source.zip | tail -n 2
+          mkdir -p ui2
+          unzip -q /tmp/ui2-original-source.zip -d ui2
+          test -s ui2/patch/kotlin/TasksActivity.kt
+          test -s ui2/patch/kotlin/TasksStyle.kt
+          test -s ui2/patch/kotlin/TasksBridge.kt
+          test -s ui2/tools/apply_tasks.py
+          test -s ui2/DESIGN_MAP_24.md
+
+      - name: Validate cumulative stages and widget sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m unittest discover -s tests -v
+          python3 -m py_compile tools/integrate_ui2.py tools/patch_engine.py
+          test -s patch/kotlin/TasksWidgetProvider.kt
+          test -s patch/kotlin/TaskEngine.kt
+          test -s patch/res/layout/tasks_widget_current.xml
+          test -s patch/res/xml/tasks_widget_info.xml
+
+      - name: Checkout pinned Loop Habit Tracker 2.3.1 dependency source
+        uses: actions/checkout@v4
+        with:
+          repository: iSoron/uhabits
+          ref: 2816b7c3d04b61277dab8765d17420f878241f09
+          path: upstream
+          fetch-depth: 1
+
+      - name: Install Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+          log-accepted-android-sdk-licenses: 'false'
+
+      - name: Install platform 36 and build-tools 36
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+          test "$(git -C upstream rev-parse HEAD)" = '2816b7c3d04b61277dab8765d17420f878241f09'
+
+      - name: Restore UI2 visual screens and integrate stages 1–4 plus widget
+        shell: bash
+        env:
+          BUILD_VARIANT: ${{ inputs.build_variant || 'debug-preview' }}
+        run: |
+          set -euo pipefail
+          python3 tools/integrate_ui2.py upstream --ui2 ui2 --variant "$BUILD_VARIANT"
+          ROOT=upstream/uhabits-android/src/main
+          test -s "$ROOT/java/org/isoron/uhabits/activities/tasks/TasksStyle.kt"
+          test -s "$ROOT/java/org/isoron/uhabits/activities/tasks/TasksActivity.kt"
+          grep -q 'private fun activeCard(' "$ROOT/java/org/isoron/uhabits/activities/tasks/TasksActivity.kt"
+          grep -q 'private fun showLegacyTaskMenu(' "$ROOT/java/org/isoron/uhabits/activities/tasks/TasksActivity.kt"
+          grep -q 'TasksWidgetProvider' "$ROOT/AndroidManifest.xml"
+          grep -q 'android:targetActivity=".activities.tasks.TasksActivity"' "$ROOT/AndroidManifest.xml"
+          grep -q 'CREATE TABLE IF NOT EXISTS calendar_plans' "$ROOT/java/org/isoron/uhabits/activities/tasks/TaskEngine.kt"
+          grep -q 'SQLiteOpenHelper(context, "odatlar_tasks.db", null, 5)' "$ROOT/java/org/isoron/uhabits/activities/tasks/TaskEngine.kt"
+          grep -q 'TasksStyle' "$ROOT/java/org/isoron/uhabits/activities/tasks/TasksActivity.kt"
+          git -C upstream diff --check
+
+      - name: Verify permanent release key (release only)
+        if: ${{ inputs.build_variant == 'signed-release' }}
+        shell: bash
+        env:
+          KEYSTORE_BASE64: ${{ secrets.TASKS_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.TASKS_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.TASKS_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.TASKS_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for v in KEYSTORE_BASE64 KEYSTORE_PASSWORD KEY_ALIAS KEY_PASSWORD; do
+            if [[ -z "${!v}" ]]; then
+              echo "::error::Required signing secret $v missing."
+              exit 1
+            fi
+          done
+          printf '%s' "$KEYSTORE_BASE64" | base64 -d > "$GITHUB_WORKSPACE/tasks-release.jks"
+          chmod 600 "$GITHUB_WORKSPACE/tasks-release.jks"
+          keytool -list -keystore "$GITHUB_WORKSPACE/tasks-release.jks" -storepass "$KEYSTORE_PASSWORD" -alias "$KEY_ALIAS" >/dev/null
+
+      - name: Compile APK
+        working-directory: upstream
+        shell: bash
+        env:
+          BUILD_VARIANT: ${{ inputs.build_variant || 'debug-preview' }}
+          LOOP_KEY_ALIAS: ${{ secrets.TASKS_KEY_ALIAS }}
+          LOOP_KEY_PASSWORD: ${{ secrets.TASKS_KEY_PASSWORD }}
+          LOOP_KEY_STORE: ${{ github.workspace }}/tasks-release.jks
+          LOOP_STORE_PASSWORD: ${{ secrets.TASKS_KEYSTORE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          if [[ "$BUILD_VARIANT" == 'signed-release' ]]; then
+            ./gradlew --no-daemon --console=plain :uhabits-android:assembleRelease --stacktrace
+          else
+            ./gradlew --no-daemon --console=plain :uhabits-android:assembleDebug --stacktrace
+          fi
+
+      - name: Verify APK identity, signature and checksum
+        shell: bash
+        env:
+          BUILD_VARIANT: ${{ inputs.build_variant || 'debug-preview' }}
+          INSTALLED_CERT_SHA256: ${{ secrets.TASKS_EXISTING_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          if [[ "$BUILD_VARIANT" == 'signed-release' ]]; then
+            APK="$(find upstream/uhabits-android/build/outputs/apk/release -maxdepth 1 -name '*.apk' -type f -print -quit)"
+          else
+            APK="$(find upstream/uhabits-android/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -type f -print -quit)"
+          fi
+          test -n "$APK" && test -s "$APK"
+          cp "$APK" "dist/Vazifalar-UI2-2.1-${BUILD_VARIANT}.apk"
+          SIGNER="$ANDROID_HOME/build-tools/36.0.0/apksigner"
+          "$SIGNER" verify --verbose --print-certs "dist/Vazifalar-UI2-2.1-${BUILD_VARIANT}.apk" > dist/SIGNATURE.txt
+          if [[ "$BUILD_VARIANT" == 'signed-release' && -n "$INSTALLED_CERT_SHA256" ]]; then
+            ACTUAL=$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' dist/SIGNATURE.txt | head -n1 | tr '[:upper:]' '[:lower:]' | tr -d ':')
+            EXPECTED=$(printf '%s' "$INSTALLED_CERT_SHA256" | tr '[:upper:]' '[:lower:]' | tr -d ':')
+            if [[ "$ACTUAL" != "$EXPECTED" ]]; then
+              echo '::error::Signing certificate does not match installed application; this APK cannot be installed over it.'
+              exit 1
+            fi
+          fi
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "dist/Vazifalar-UI2-2.1-${BUILD_VARIANT}.apk" | grep '^package:' > dist/PACKAGE.txt
+          sha256sum dist/*.apk > dist/SHA256SUMS.txt
+          printf 'UI2 source commit: 051fe85aefe32bba6b8af56273f87d13e74e5375\nUpstream: 2816b7c3d04b61277dab8765d17420f878241f09\nVariant: %s\n' "$BUILD_VARIANT" > dist/BUILD_INFO.txt
+
+      - name: Publish verified Android APK and diagnostics
+        uses: actions/upload-artifact@v4
+        with:
+          name: Vazifalar-UI2-2.1-${{ inputs.build_variant || 'debug-preview' }}-APK
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove signing key from CI worker
+        if: always()
+        run: rm -f "$GITHUB_WORKSPACE/tasks-release.jks"
