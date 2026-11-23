@@ -89,6 +89,20 @@ jobs:
           print('PASS: manifests, widget resources, calendar and reminders source present')
           PY
 
+      - name: Kotlin diagnostics compatibility fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          path=Path('upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TaskDiagnostics.kt')
+          source=path.read_text()
+          old='fun record(context: Context, stage: String, error: Exception)'
+          assert source.count(old)==1, 'Diagnostics compatibility contract changed'
+          path.write_text(source.replace(old,'fun record(context: Context, stage: String, error: Throwable)'))
+          print('PASS: diagnostic logger accepts kotlin.Throwable')
+          PY
+
       - name: Assemble debug APK
         shell: bash
         working-directory: upstream
