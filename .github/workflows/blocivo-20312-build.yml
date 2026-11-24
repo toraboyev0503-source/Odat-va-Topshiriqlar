@@ -202,13 +202,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo '8b58f162531aacf9ac34248da7896f54b0611033b9da9aa8b768bf9ced13c21b  upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TasksActivity.kt' | sha256sum -c -
-          echo 'cf62e34f680b784542bd8ea88ce22749e11fc1b6d306d86bb98a948f87299377  upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TasksStyle.kt' | sha256sum -c -
-          echo '29a2cf4e403f92d28e8c01ad58e9db6f048c6acfe853d7013beb0f1eb17ce5b0  upstream/uhabits-android/build.gradle.kts' | sha256sum -c -
           test -s blocivo-20312/overlay.tar.xz.b64
           base64 --decode blocivo-20312/overlay.tar.xz.b64 > /tmp/blocivo20312-overlay.tar.xz
           echo '23bcb453c9be5133822635a628f3a52718d4cef04e24067062ca54e88b84408e  /tmp/blocivo20312-overlay.tar.xz' | sha256sum -c -
           tar -xJf /tmp/blocivo20312-overlay.tar.xz -C upstream
+          echo 'f9612c03269c0c2901a27b46fd69ebcd7536c375e35074bb0f4ef7801b55e47b  upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TasksActivity.kt' | sha256sum -c -
+          echo '98977997435ec3727338f5a12513b8d84d9b3e0233d46f34da0c1749fcaf6c86  upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TasksStyle.kt' | sha256sum -c -
+          echo 'fb58c09c0620af564b2ce3e4fd706b421b626e4ed4dd32fca5373674b7e3dcdb  upstream/uhabits-android/build.gradle.kts' | sha256sum -c -
           python3 upstream/tools/verify_blocivo_20312.py upstream
           grep -q 'versionCode = 20312' upstream/uhabits-android/build.gradle.kts
           grep -q 'SQLiteOpenHelper(context, "odatlar_tasks.db", null, 6)' upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TaskEngine.kt
