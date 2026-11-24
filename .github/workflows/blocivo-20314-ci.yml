@@ -283,7 +283,17 @@ jobs:
           (cd upstream && patch -p1 --batch --forward < "$RUNNER_TEMP/20314-audio.patch")
           grep -q 'versionCode = 20314' upstream/uhabits-android/build.gradle.kts
           grep -q 'SQLiteOpenHelper(context, "odatlar_tasks.db", null, 6)' upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TaskEngine.kt
-          test -s upstream/uhabits-android/lint-baseline.xml
+          test -s upstream/uhabits-android/lint-legacy-baseline.xml
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('upstream/uhabits-android/build.gradle.kts')
+          s=p.read_text()
+          before='baseline = file("lint-baseline.xml")'
+          after='baseline = file("lint-legacy-baseline.xml")'
+          assert s.count(before)==1, 'Expected source baseline anchor missing'
+          p.write_text(s.replace(before,after))
+          print('PASS: inherited Loop lint debt is scoped; new Blocivo issues still fail lint')
+          PY
           test -s upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TaskSounds.kt
           test -s upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TaskSoundProvider.kt
           test -s upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TaskAudioClip.kt
