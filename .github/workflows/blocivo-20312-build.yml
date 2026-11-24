@@ -214,6 +214,22 @@ jobs:
           grep -q 'SQLiteOpenHelper(context, "odatlar_tasks.db", null, 6)' upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TaskEngine.kt
           echo 'PASS: Blocivo 20312 source archive identity, task data compatibility and strip policy'
 
+      - name: Preserve tested widget and date picker compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TasksActivity.kt')
+          a=p.read_text()
+          assert a.count('TasksWidget.refresh(this)') == 2, 'Unexpected widget calls; revise compatibility patch'
+          assert a.count('R.style.VazifalarDatePickerTheme') == 3, 'Unexpected calendar style references'
+          a=a.replace('TasksWidget.refresh(this)','TaskWidget.refreshAll(this)')
+          a=a.replace('R.style.VazifalarDatePickerTheme','R.style.BlocivoDatePickerTheme')
+          p.write_text(a)
+          print('PASS: preserved Blocivo 20311 widget and calendar integrations in 20312 activity')
+          PY
+
       - name: Java 17
         uses: actions/setup-java@v4
         with:
