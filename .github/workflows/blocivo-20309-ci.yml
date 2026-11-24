@@ -1,9 +1,9 @@
-name: Blocivo 20309 - Android APK build
+name: Blocivo 20310 - Stable small-block scrolling
 
 on:
   push:
     branches:
-      - blocivo-20309-build
+      - blocivo-20310-strip-stability
   workflow_dispatch:
 
 permissions:
@@ -163,6 +163,25 @@ jobs:
           PY
           grep -q 'versionCode = 20309' upstream/uhabits-android/build.gradle.kts
 
+      - name: Fix small cards jumping, preserve scroll and prevent per-second layout churn
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 blocivo-20310/fix_strip.py upstream
+          python3 - <<'PY'
+          from pathlib import Path
+          src=Path('upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TasksActivity.kt').read_text()
+          assert 'blockStripView?.let' in src
+          assert 'observer.addOnPreDrawListener' in src
+          assert 'post { scrollTo(desiredScrollX' not in src
+          assert 'if (blockStripView === this@strip) blockStripScrollX = x' in src
+          assert 'if (track.childCount == 2)' in src
+          assert 'SQLiteOpenHelper(context, "odatlar_tasks.db", null, 6)' in Path('upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TaskEngine.kt').read_text()
+          gradle=Path('upstream/uhabits-android/build.gradle.kts').read_text()
+          assert 'versionCode = 20310' in gradle
+          print('PASS: horizontal scroll, small-card state and DB v6 static regression gates')
+          PY
+
       - name: Java 17
         uses: actions/setup-java@v4
         with:
@@ -186,42 +205,6 @@ jobs:
         working-directory: upstream
         run: ./gradlew --no-daemon --console=plain :uhabits-android:lintDebug
 
-      - name: Optional verified stable release signing
-        shell: bash
-        env:
-          TASKS_KEYSTORE_BASE64: ${{ secrets.TASKS_KEYSTORE_BASE64 }}
-          TASKS_KEYSTORE_PASSWORD: ${{ secrets.TASKS_KEYSTORE_PASSWORD }}
-          TASKS_KEY_ALIAS: ${{ secrets.TASKS_KEY_ALIAS }}
-          TASKS_KEY_PASSWORD: ${{ secrets.TASKS_KEY_PASSWORD }}
-          TASKS_EXPECTED_CERT_SHA256: ${{ secrets.TASKS_EXPECTED_CERT_SHA256 }}
-        run: |
-          set -euo pipefail
-          mkdir -p dist
-          if [[ -z "$TASKS_KEYSTORE_BASE64" || -z "$TASKS_KEYSTORE_PASSWORD" || -z "$TASKS_KEY_ALIAS" || -z "$TASKS_KEY_PASSWORD" || -z "$TASKS_EXPECTED_CERT_SHA256" ]]; then
-            echo '::warning::Stable signing secrets not configured. Debug-only candidate will be produced.'
-            exit 0
-          fi
-          export TASKS_KEYSTORE_FILE="$RUNNER_TEMP/blocivo-stable-keystore.p12"
-          printf '%s' "$TASKS_KEYSTORE_BASE64" | base64 --decode > "$TASKS_KEYSTORE_FILE"
-          chmod 600 "$TASKS_KEYSTORE_FILE"
-          keytool -list -v -storetype PKCS12 -keystore "$TASKS_KEYSTORE_FILE" -storepass "$TASKS_KEYSTORE_PASSWORD" -alias "$TASKS_KEY_ALIAS" > "$RUNNER_TEMP/identity.txt"
-          actual="$(grep -m1 'SHA256:' "$RUNNER_TEMP/identity.txt" | sed 's/^.*SHA256: *//' | tr -cd '[:xdigit:]' | tr '[:upper:]' '[:lower:]')"
-          expected="$(printf '%s' "$TASKS_EXPECTED_CERT_SHA256" | tr -cd '[:xdigit:]' | tr '[:upper:]' '[:lower:]')"
-          if [[ "$actual" != "$expected" || "$(printf '%s' "$expected" | wc -c)" -ne 64 ]]; then
-            echo '::error::Pinned signer mismatch. Refusing release.'
-            exit 1
-          fi
-          (cd upstream && ./gradlew --no-daemon --console=plain :uhabits-android:assembleRelease :uhabits-android:lintRelease)
-          release="$(find upstream/uhabits-android/build/outputs/apk/release -maxdepth 1 -type f -name '*.apk' -print -quit)"
-          test -s "$release"
-          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$release" > "$RUNNER_TEMP/signature.txt"
-          built="$(grep -m1 'Signer #1 certificate SHA-256 digest:' "$RUNNER_TEMP/signature.txt" | sed 's/^.*digest: *//' | tr -cd '[:xdigit:]' | tr '[:upper:]' '[:lower:]')"
-          test "$built" = "$expected"
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$release" > "$RUNNER_TEMP/package.txt"
-          grep -q "package: name='org.isoron.uhabits.tasks.phase2.preview' versionCode='20309'" "$RUNNER_TEMP/package.txt"
-          cp "$release" dist/Blocivo_20309_STABLE_SIGNED.apk
-          echo 'PASS: stable-signed Blocivo release verified.'
-
       - name: Collect build outputs
         if: always()
         shell: bash
@@ -231,17 +214,13 @@ jobs:
           if find dist -name '*.apk' -print -quit | grep -q .; then
              (cd dist && sha256sum *.apk > SHA256SUMS.txt)
           fi
-          if [[ -f dist/Blocivo_20309_STABLE_SIGNED.apk ]]; then
-            echo 'Stable signed APK present. Use the same key for future updates.' > dist/SIGNING_STATUS.txt
-          else
-            echo 'DEBUG APK ONLY. No persistent signing key; updating installed 20308 is not guaranteed.' > dist/SIGNING_STATUS.txt
-          fi
+          echo 'CI debug APK - MUST be signed offline with the PINNED Blocivo stable key before installation.' > dist/SIGNING_STATUS.txt
 
       - name: Upload installable debug APK
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: Blocivo-20309-Build-Artifact
+          name: Blocivo-20310-DEBUG-FOR-RE-SIGNING
           path: dist/
           if-no-files-found: warn
           retention-days: 21
