@@ -1,0 +1,43 @@
+name: Blocivo Android Signing Tools
+
+on:
+  push:
+    branches:
+      - blocivo-signing-toolchain-20261124
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tools:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Install Android build tools
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+      - name: Install apksigner
+        run: sdkmanager 'build-tools;36.0.0'
+      - name: Package official signing binaries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist/signing-tools
+          cp "$ANDROID_HOME/build-tools/36.0.0/apksigner" dist/signing-tools/
+          cp "$ANDROID_HOME/build-tools/36.0.0/zipalign" dist/signing-tools/
+          cp -r "$ANDROID_HOME/build-tools/36.0.0/lib" dist/signing-tools/
+          chmod +x dist/signing-tools/{apksigner,zipalign}
+          tar -czf dist/android-36-apksigner-tools.tar.gz -C dist signing-tools
+          sha256sum dist/android-36-apksigner-tools.tar.gz > dist/SHA256SUMS
+      - name: Upload tools
+        uses: actions/upload-artifact@v4
+        with:
+          name: Official-Android-ApkSigner-Tools
+          path: |
+            dist/android-36-apksigner-tools.tar.gz
+            dist/SHA256SUMS
+          retention-days: 7
