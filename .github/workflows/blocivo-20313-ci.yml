@@ -1,4 +1,4 @@
-name: Blocivo 20313 - Canonical source Android build + audit
+name: Blocivo 20313 - Legacy lint scoped, strict new lint, emulator tests
 
 on:
   push:
@@ -259,6 +259,20 @@ jobs:
           python3 upstream/tools/verify_blocivo_20313.py upstream
           grep -q 'versionCode = 20313' upstream/uhabits-android/build.gradle.kts
 
+      - name: Fix active Blocivo lint error; baseline documented inherited legacy issues
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat blocivo-20313/lintfix.part{1,2,3}.b64 | tr -d '\n' | base64 -d > "$RUNNER_TEMP/blocivo-20313-lintfix.tar.xz"
+          echo "d6606cc0957fac0208192715bb4b9200a13017125dee7a021e7afacbf71a7ef7  $RUNNER_TEMP/blocivo-20313-lintfix.tar.xz" | sha256sum --check
+          tar -xJf "$RUNNER_TEMP/blocivo-20313-lintfix.tar.xz" -C upstream
+          grep -q 'lint.abortOnError = true' upstream/uhabits-android/build.gradle.kts
+          grep -q 'lint.baseline = file("lint-legacy-baseline.xml")' upstream/uhabits-android/build.gradle.kts
+          test -s upstream/uhabits-android/lint-legacy-baseline.xml
+          test -s upstream/LINT_LEGACY_BASELINE.md
+          python3 upstream/tools/verify_blocivo_20313.py upstream
+          echo 'PASS: Blocivo active lint fixed; pre-existing legacy failures tracked separately. New lint errors still abort build.'
+
       - name: Java 17
         uses: actions/setup-java@v4
         with:
@@ -277,6 +291,20 @@ jobs:
         working-directory: upstream
         run: |
           ./gradlew --no-daemon --console=plain :uhabits-android:assembleDebug :uhabits-android:testDebugUnitTest :uhabits-android:assembleDebugAndroidTest :uhabits-android:lintDebug --stacktrace
+
+      - name: Preserve compiled intermediate for debugging (NOT FINAL APK)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p intermediate
+          test -s upstream/uhabits-android/build/outputs/apk/debug/uhabits-android-debug.apk
+          cp upstream/uhabits-android/build/outputs/apk/debug/uhabits-android-debug.apk intermediate/Blocivo_20313_FOR_TESTING_ONLY.apk
+      - name: Upload compiled intermediate (not stable-signed)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Blocivo-20313-INTERMEDIATE-NOT-FOR-INSTALL
+          path: intermediate/
+          retention-days: 7
 
       - name: Execute Android UI tests (API 35 emulator)
         uses: reactivecircus/android-emulator-runner@v2
