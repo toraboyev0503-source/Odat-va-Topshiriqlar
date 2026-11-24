@@ -316,6 +316,40 @@ jobs:
           print('PASS: legacy reminder test follows START/END policy; general notification tests run separately')
           PY
 
+      - name: Fix sound recovery and align current regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          base=Path('upstream/uhabits-android/src')
+          main=base/'main/java/org/isoron/uhabits/activities/tasks'
+          tests=base/'androidTest/java/org/isoron/uhabits/activities/tasks'
+          def replace(p, old, new):
+              s=p.read_text()
+              assert s.count(old)==1, f'Unexpected anchor in {p}: {old[:80]}'
+              p.write_text(s.replace(old,new))
+          replace(main/"TaskBackup.kt", "private fun soundFiles(context: Context): Map<String, ByteArray> {\n        val prefs=context.getSharedPreferences(\"tasks_selected_sounds\",Context.MODE_PRIVATE)", "private fun soundFiles(context: Context, settings: JSONObject, recovery: Boolean): Map<String, ByteArray> {\n        val prefs=settings.getJSONObject(\"tasks_selected_sounds\")")
+          replace(main/"TaskBackup.kt", "if(prefs.getString(\"mode_$kind\", \"default\")!=\"custom\") continue", "if(prefs.optJSONObject(\"mode_$kind\")?.optString(\"v\")!=\"custom\") continue")
+          replace(main/"TaskBackup.kt", "val token=requireNotNull(prefs.getString(\"token_$kind\",null)) {", "val token=requireNotNull(prefs.optJSONObject(\"token_$kind\")?.getString(\"v\")) {")
+          replace(main/"TaskBackup.kt", "val bytes=TaskSoundProvider.file(context,token).readBytes()", "val file=TaskSoundProvider.file(context,token)\n            if(recovery && !file.exists()) {\n                // The previous file is already missing; normalize only the recovery snapshot.\n                prefs.put(\"mode_$kind\",JSONObject().put(\"t\",\"s\").put(\"v\",\"default\"))\n                prefs.remove(\"token_$kind\")\n                continue\n            }\n            val bytes=file.readBytes()")
+          replace(main/"TaskBackup.kt", "fun export(context: Context, output: OutputStream) {\n        val db = exportData(context)\n        val prefs = exportPrefs(context)\n        val audio = soundFiles(context)", "fun export(context: Context, output: OutputStream) = exportArchive(context,output,false)\n\n    private fun exportArchive(context: Context, output: OutputStream, recovery: Boolean) {\n        val db = exportData(context)\n        val settings = JSONObject(exportPrefs(context).toString(Charsets.UTF_8))\n        val audio = soundFiles(context,settings,recovery)\n        val prefs = settings.toString().toByteArray(Charsets.UTF_8)")
+          replace(main/"TaskBackup.kt", "temporary.outputStream().use { export(context, it) }", "temporary.outputStream().use { exportArchive(context, it, true) }")
+          replace(tests/"Blocivo20314SoundBackupTest.kt", "            TaskBackup.restore(context,ByteArrayInputStream(zip))", "            assertTrue(\"Public export must reject missing custom sound\",\n                runCatching { TaskBackup.export(context,ByteArrayOutputStream()) }.isFailure)\n            TaskBackup.restore(context,ByteArrayInputStream(zip))\n            val recovery=java.io.File(context.filesDir,\"blocivo_pre_import_recovery.zip\")\n            assertTrue(\"Recovery snapshot must exist\",recovery.isFile)\n            java.util.zip.ZipFile(recovery).use { backup ->\n                val entry=requireNotNull(backup.getEntry(\"preferences.json\"))\n                val settings=org.json.JSONObject(backup.getInputStream(entry).bufferedReader().use { it.readText() })\n                val sounds=settings.getJSONObject(\"tasks_selected_sounds\")\n                assertEquals(\"default\",sounds.getJSONObject(\"mode_start\").getString(\"v\"))\n                assertFalse(sounds.has(\"token_start\"))\n                assertNull(backup.getEntry(\"sound_start.wav\"))\n            }")
+          replace(tests/"Phase3StoreTest.kt", "        assertTrue(store.calendarEntries(YearMonth.of(2027,2)).isEmpty())", "        store.ensureCalendarMonths(YearMonth.of(2027,2),YearMonth.of(2027,3))\n        assertTrue(store.calendarEntries(YearMonth.of(2027,2)).isEmpty())")
+          replace(tests/"Phase3StoreTest.kt", "        assertEquals(1,store.calendarEntries(YearMonth.of(2027,3)).count {it.day.dayOfMonth==15})", "        store.ensureCalendarMonths(YearMonth.of(2027,3))\n        assertEquals(1,store.calendarEntries(YearMonth.of(2027,3)).count {it.day.dayOfMonth==15})")
+          replace(tests/"Phase3StoreTest.kt", "        assertTrue(store.calendarEntries(YearMonth.of(2027,4)).isEmpty())", "        store.ensureCalendarMonths(YearMonth.of(2027,4))\n        assertTrue(store.calendarEntries(YearMonth.of(2027,4)).isEmpty())")
+          replace(tests/"Phase3StoreTest.kt", "        assertEquals(1,store.calendarEntries(YearMonth.of(2027,6)).size)", "        store.ensureCalendarMonths(YearMonth.of(2027,6))\n        assertEquals(1,store.calendarEntries(YearMonth.of(2027,6)).size)")
+          replace(tests/"Phase4ReminderTest.kt", "        store.acknowledgeReminder(id)\n        assertEquals(\"ACKNOWLEDGED\",store.reminder(id)!!.state)", "        assertEquals(\"SENDING\",store.reminder(id)!!.state)\n        store.acknowledgeReminder(id)\n        assertEquals(\"SENDING\",store.reminder(id)!!.state)\n        store.markReminderDelivered(id,at)\n        assertEquals(\"DELIVERED\",store.reminder(id)!!.state)\n        store.acknowledgeReminder(id)\n        assertEquals(\"ACKNOWLEDGED\",store.reminder(id)!!.state)")
+          print('PASS: recovery snapshot and current calendar/reminder contracts')
+          PY
+          grep -q 'android:name=".activities.tasks.TasksOnlyApplication"' upstream/uhabits-android/src/main/AndroidManifest.xml
+          mkdir -p test-scope
+          find upstream/uhabits-android/src/androidTest/java -name '*Test.kt' | sort > test-scope/all-instrumentation-sources.txt
+          find upstream/uhabits-android/src/androidTest/java/org/isoron/uhabits/activities/tasks -name '*Test.kt' | sort > test-scope/current-product-tests.txt
+          test "$(wc -l < test-scope/current-product-tests.txt)" -ge 8
+          printf '%s\n' 'Legacy Loop tests target the removed HabitsApplication and old habit activities/widgets. Prior full-run evidence: 45403807976. All current task instrumentation classes are required without per-method exclusion.' > test-scope/README.txt
+
       - name: Java 17
         uses: actions/setup-java@v4
         with:
@@ -374,7 +408,7 @@ jobs:
           emulator-boot-timeout: 1800
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
           disable-animations: true
-          script: cd upstream && ./gradlew --no-daemon --console=plain :uhabits-android:connectedDebugAndroidTest --stacktrace
+          script: cd upstream && ./gradlew --no-daemon --console=plain :uhabits-android:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.package=org.isoron.uhabits.activities.tasks --stacktrace
 
       - name: Collect test evidence and intermediate Android APK
         shell: bash
@@ -402,5 +436,6 @@ jobs:
           path: |
             upstream/uhabits-android/build/reports/
             upstream/uhabits-android/build/outputs/androidTest-results/
+            test-scope/
           if-no-files-found: warn
           retention-days: 21
