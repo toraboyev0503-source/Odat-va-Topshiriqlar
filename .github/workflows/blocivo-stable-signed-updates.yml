@@ -1,0 +1,243 @@
+name: Blocivo Persistent-Signer Update Build
+
+on:
+  push:
+    branches:
+      - 'blocivo-*'
+    paths:
+      - 'stage5/**'
+      - 'blocivo-*/**'
+      - 'uhabits-android/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 85
+    steps:
+      - name: Checkout Stage5 payloads
+        uses: actions/checkout@v4
+
+      - name: Restore exact successful Phase2 patched source
+        uses: actions/download-artifact@v4
+        with:
+          name: OdatlarNazorati-Vazifalar-Phase2-SOURCE
+          run-id: 45100494701
+          repository: toraboyev0503-source/Odat-va-Topshiriqlar
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: phase2-source
+
+      - name: Reconstruct Phase5 project
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s phase2-source/OdatlarNazorati-Vazifalar-Phase2-PATCHED-SOURCE.zip
+          mkdir upstream
+          unzip -q phase2-source/OdatlarNazorati-Vazifalar-Phase2-PATCHED-SOURCE.zip -d upstream
+          base64 -d stage5/source_text.tar.xz.b64 | xz -d | tar -xf - -C upstream
+          base64 -d stage5/hourglass_512.webp.b64 > /tmp/phase5-icon.webp
+          python3 -m pip install -q Pillow
+          python3 - <<'PY'
+          from pathlib import Path
+          from PIL import Image,ImageOps,ImageDraw
+          base=Path('upstream/uhabits-android/src/main/res')
+          img=Image.open('/tmp/phase5-icon.webp').convert('RGBA')
+          # Preserve the supplied icon and its white-blue gradient across all densities
+          for bucket,pixels in [('mdpi',48),('hdpi',72),('xhdpi',96),('xxhdpi',144),('xxxhdpi',192)]:
+              p=base/('mipmap-'+bucket)
+              p.mkdir(parents=True,exist_ok=True)
+              main=img.resize((pixels,pixels),Image.Resampling.LANCZOS)
+              for name in ('ic_launcher.png','ic_launcher_round.png'):
+                  main.save(p/name,optimize=True)
+              fgpixels=int(pixels*2.25)
+              fg=Image.new('RGBA',(fgpixels,fgpixels),(0,0,0,0))
+              inside=img.resize((int(fgpixels*0.70),int(fgpixels*0.70)),Image.Resampling.LANCZOS)
+              fg.alpha_composite(inside,((fgpixels-inside.width)//2,(fgpixels-inside.height)//2))
+              fg.save(p/'ic_launcher_foreground.png',optimize=True)
+              # Monochrome alpha mask derived from dark-blue marks
+              rgba=fg.load()
+              mono=Image.new('RGBA',fg.size,(0,0,0,0))
+              pix=mono.load()
+              for y in range(fgpixels):
+                  for x in range(fgpixels):
+                      r,g,b,a=rgba[x,y]
+                      visibility=max(0,min(255,int((b-r-9)*12)))
+                      pix[x,y]=(0,0,0,min(a,visibility))
+              mono.save(p/'ic_launcher_monochrome.png',optimize=True)
+          splash=base/'drawable-nodpi'
+          splash.mkdir(parents=True,exist_ok=True)
+          img.resize((256,256),Image.Resampling.LANCZOS).save(splash/'tasks_splash_icon.png',optimize=True)
+          print('PASS: custom icon densities and splash assets generated')
+          PY
+          test -f upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TaskWidget.kt
+          grep -q 'versionCode = 20306' upstream/uhabits-android/build.gradle.kts
+          grep -q 'SQLiteOpenHelper(context, "odatlar_tasks.db", null, 6)' upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TaskEngine.kt
+          chmod +x upstream/gradlew
+
+      - name: Kotlin compatibility fix and widget Android test refresh
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          pkg=Path('upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks')
+          p=pkg/'TaskDiagnostics.kt'
+          original=p.read_text()
+          before='fun record(context: Context, stage: String, error: Exception)'
+          after='fun record(context: Context, stage: String, error: Throwable)'
+          assert original.count(before)==1,'Unexpected diagnostics contract'
+          p.write_text(original.replace(before,after))
+          tests=Path('upstream/uhabits-android/src/androidTest/java/org/isoron/uhabits/activities/tasks/Phase5WidgetTest.kt')
+          tests.write_text("""
+          package org.isoron.uhabits.activities.tasks
+
+          import org.junit.Assert.*
+          import org.junit.Test
+          import org.junit.runner.RunWith
+          import androidx.test.ext.junit.runners.AndroidJUnit4
+          import java.time.LocalDate
+
+          @RunWith(AndroidJUnit4::class)
+          class Phase5WidgetTest {
+              @Test fun paginationAndBounds() {
+                  assertEquals(1, WidgetPageMath.pages(0,4))
+                  assertEquals(3, WidgetPageMath.pages(9,4))
+                  assertEquals(2, WidgetPageMath.page(20,9,4))
+                  assertEquals(4 until 8, WidgetPageMath.visibleIndices(1,9,4))
+              }
+              @Test fun expiredAndCrossBlockActionsRejected() {
+                  val day=LocalDate.now().toString()
+                  assertTrue(WidgetPageMath.canChange(TaskWidget.DONE,day,2,"PENDING",null,day,2,day,2))
+                  assertFalse(WidgetPageMath.canChange(TaskWidget.DONE,day,2,"DONE",null,day,2,day,2))
+                  assertFalse(WidgetPageMath.canChange(TaskWidget.FAILED,day,2,"PENDING",null,day,2,day,3))
+                  assertFalse(WidgetPageMath.canChange(TaskWidget.DONE,day,2,"PENDING","FAILED",day,2,day,2))
+              }
+          }
+          """.strip()+"\n")
+          print("PASS: Kotlin diagnostic type and Phase5 widget test names corrected")
+          PY
+
+      - name: Apply 20307 and Blocivo 20308 changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 stage5/fix_checkbox_crash.py upstream
+          cp -a stage5/blocivo_overlay/. upstream/
+          python3 stage5/apply_blocivo_20308.py upstream
+          grep -q 'versionCode = 20308' upstream/uhabits-android/build.gradle.kts
+          grep -q 'name="tasks_preview_app_name">Blocivo' upstream/uhabits-android/src/main/res/values/tasks_phase2.xml
+          grep -q 'SQLiteOpenHelper(context, "odatlar_tasks.db", null, 6)' upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TaskEngine.kt
+
+      - name: Apply approved Blocivo 20309 patch and run regression tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -s blocivo-20309/overlay.part1.b64
+          cat blocivo-20309/overlay.part{1,2,3,4}.b64 | tr -d '\n' | base64 -d | xz -d | tar -xvf - -C upstream
+          grep -q 'versionCode = 20309' upstream/uhabits-android/build.gradle.kts
+          grep -q 'SQLiteOpenHelper(context, "odatlar_tasks.db", null, 6)' upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TaskEngine.kt
+          python3 upstream/tools/verify_blocivo_20309.py upstream
+          echo "20309 patch and 7 tests verified."
+
+      - name: Fix 20309 widget and date picker compatibility with compiled base
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          package=Path('upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks')
+          widget=package/'TaskWidget.kt'
+          w=widget.read_text()
+          original='store.blockSummary(today, active).percentage'
+          replacement='store.list(today, active).let { tasks -> if (tasks.isEmpty()) 0 else 100 * tasks.count { it.status == "DONE" } / tasks.size }'
+          assert w.count(original)==1, 'Widget percentage anchor mismatch'
+          widget.write_text(w.replace(original,replacement))
+          activity=package/'TasksActivity.kt'
+          a=activity.read_text()
+          assert a.count('TasksWidget.refresh(this)')==1, 'Widget refresh anchor mismatch'
+          a=a.replace('TasksWidget.refresh(this)','TaskWidget.refreshAll(this)')
+          assert a.count('R.style.VazifalarDatePickerTheme')==3, 'Date picker style anchor mismatch'
+          a=a.replace('R.style.VazifalarDatePickerTheme','R.style.BlocivoDatePickerTheme')
+          activity.write_text(a)
+          print('PASS: widget stats, widget refresh and date picker style fixed')
+          PY
+          grep -q 'versionCode = 20309' upstream/uhabits-android/build.gradle.kts
+
+      - name: Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools'
+          log-accepted-android-sdk-licenses: 'false'
+
+      - name: Android SDK 36
+        run: sdkmanager 'platforms;android-36' 'build-tools;36.0.0'
+
+      - name: Build Android debug APK and instrumented test package
+        working-directory: upstream
+        run: ./gradlew --no-daemon --console=plain :uhabits-android:assembleDebug :uhabits-android:assembleDebugAndroidTest --stacktrace
+
+      - name: Lint
+        working-directory: upstream
+        run: ./gradlew --no-daemon --console=plain :uhabits-android:lintDebug
+
+      - name: Sign and verify with the ONE pinned Blocivo key (never debug fallback)
+        shell: bash
+        env:
+          TASKS_KEYSTORE_BASE64: ${{ secrets.TASKS_KEYSTORE_BASE64 }}
+          TASKS_KEYSTORE_PASSWORD: ${{ secrets.TASKS_KEYSTORE_PASSWORD }}
+          TASKS_KEY_ALIAS: ${{ secrets.TASKS_KEY_ALIAS }}
+          TASKS_KEY_PASSWORD: ${{ secrets.TASKS_KEY_PASSWORD }}
+          TASKS_EXPECTED_CERT_SHA256: ${{ secrets.TASKS_EXPECTED_CERT_SHA256 }}
+        run: |
+          set -euo pipefail
+          for key in TASKS_KEYSTORE_BASE64 TASKS_KEYSTORE_PASSWORD TASKS_KEY_ALIAS TASKS_KEY_PASSWORD TASKS_EXPECTED_CERT_SHA256; do
+            if [[ -z "${!key}" ]]; then echo "::error::Missing permanent signing GitHub Secret: $key. APK will NOT be published."; exit 1; fi
+          done
+          pinned='92f5704502db2a193321aa35780e8a0ecaaf9704294a851737d213f17c089b1d'
+          expected="$(echo "$TASKS_EXPECTED_CERT_SHA256" | tr -cd '[:xdigit:]' | tr '[:upper:]' '[:lower:]')"
+          if [[ "$expected" != "$pinned" ]]; then echo '::error::Expected signer is not Blocivo permanent identity'; exit 1; fi
+          keystore="$RUNNER_TEMP/blocivo-update-key.p12"
+          printf '%s' "$TASKS_KEYSTORE_BASE64" | base64 --decode > "$keystore"
+          chmod 600 "$keystore"
+          keytool -list -v -storetype PKCS12 -keystore "$keystore" -storepass "$TASKS_KEYSTORE_PASSWORD" -alias "$TASKS_KEY_ALIAS" > "$RUNNER_TEMP/keyinfo.txt"
+          actual="$(grep -m1 'SHA256:' "$RUNNER_TEMP/keyinfo.txt" | sed 's/.*SHA256: *//' | tr -cd '[:xdigit:]' | tr '[:upper:]' '[:lower:]')"
+          if [[ "$actual" != "$pinned" ]]; then echo '::error::Wrong signing keystore. Refusing APK.'; exit 1; fi
+          input='upstream/uhabits-android/build/outputs/apk/debug/uhabits-android-debug.apk'
+          test -s "$input"
+          mkdir -p dist
+          output='dist/Blocivo_STABLE_SIGNED.apk'
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" sign \
+            --ks "$keystore" --ks-type PKCS12 --ks-key-alias "$TASKS_KEY_ALIAS" \
+            --ks-pass env:TASKS_KEYSTORE_PASSWORD --key-pass env:TASKS_KEY_PASSWORD \
+            --v1-signing-enabled true --v2-signing-enabled true --v3-signing-enabled true \
+            --out "$output" "$input"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --min-sdk-version 28 --verbose --print-certs "$output" > "$RUNNER_TEMP/apk-signature.txt"
+          signed="$(grep -m1 'Signer #1 certificate SHA-256 digest:' "$RUNNER_TEMP/apk-signature.txt" | sed 's/.*digest: *//' | tr -cd '[:xdigit:]' | tr '[:upper:]' '[:lower:]')"
+          if [[ "$signed" != "$pinned" ]]; then echo '::error::Output APK signature mismatch'; exit 1; fi
+          package="$($ANDROID_HOME/build-tools/36.0.0/aapt dump badging "$output" | head -n1)"
+          echo "$package" | grep -q "package: name='org.isoron.uhabits.tasks.phase2.preview'"
+          code="$(grep -m1 -oE 'versionCode = [0-9]+' upstream/uhabits-android/build.gradle.kts | awk '{print $3}')"
+          echo "$package" | grep -q "versionCode='$code'"
+          (cd dist && sha256sum Blocivo_STABLE_SIGNED.apk > SHA256SUMS.txt)
+          printf 'Version code: %s\nPackage: org.isoron.uhabits.tasks.phase2.preview\nSigner SHA256: %s\n' "$code" "$signed" > dist/UPDATE_VERIFIED.txt
+          echo 'PASS: package/version/signer checked; no temporary debug-signed build published.'
+
+      - name: Publish only permanent-key APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Blocivo-Permanent-Signed-Update
+          path: |
+            dist/Blocivo_STABLE_SIGNED.apk
+            dist/SHA256SUMS.txt
+            dist/UPDATE_VERIFIED.txt
+          if-no-files-found: error
+          retention-days: 21
