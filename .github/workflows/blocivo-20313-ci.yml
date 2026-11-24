@@ -238,6 +238,9 @@ jobs:
           echo 'fcc9ea77ac90aadd24127a78496ecef665410116801fee4da43ef7de86d32ce4  '"$RUNNER_TEMP/blocivo-20313-delta.tar.xz" | sha256sum --check --status
           xz -d -c "$RUNNER_TEMP/blocivo-20313-delta.tar.xz" | tar -xf - -C upstream
           rm -f upstream/uhabits-android/src/androidTest/java/org/isoron/uhabits/activities/tasks/Blocivo20312StripUiTest.kt
+          cat blocivo-20313/basefix.part{1,2}.b64 | tr -d '\n' | base64 -d > "$RUNNER_TEMP/blocivo-20313-basefix.tar.xz"
+          echo '87c5dd88994f79a5f17ce6adf130617f8c9327fc54fe61b6d6b87e5a086b1820  '"$RUNNER_TEMP/blocivo-20313-basefix.tar.xz" | sha256sum --check --status
+          xz -d -c "$RUNNER_TEMP/blocivo-20313-basefix.tar.xz" | tar -xf - -C upstream
           python3 - <<'PY'
           import hashlib,json
           from pathlib import Path
