@@ -1,4 +1,4 @@
-name: Blocivo 20313 - Legacy lint scoped, strict new lint, emulator tests
+name: Blocivo 20314 - Start/End sounds Android build
 
 on:
   push:
@@ -290,6 +290,21 @@ jobs:
           grep -q 'TaskSounds.GENERAL' upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TaskReminders.kt
           grep -q 'TaskSoundPolicy.event' upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks/TasksAlarms.kt
           echo 'PASS: reviewed Blocivo 20314 source patch, version and task DB compatibility'
+
+      - name: Migrate obsolete Phase4 notification test constants
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('upstream/uhabits-android/src/androidTest/java/org/isoron/uhabits/activities/tasks/Phase4ReminderTest.kt')
+          s=p.read_text()
+          assert s.count('TaskSounds.BLOCK')==2 and s.count('TaskSounds.REMINDER')==3, 'Phase4 test shape changed'
+          s=s.replace('TaskSounds.BLOCK','TaskSounds.START').replace('TaskSounds.REMINDER','TaskSounds.END')
+          p.write_text(s)
+          assert 'TaskSounds.BLOCK' not in p.read_text()
+          print('PASS: legacy reminder test follows START/END policy; general notification tests run separately')
+          PY
 
       - name: Java 17
         uses: actions/setup-java@v4
