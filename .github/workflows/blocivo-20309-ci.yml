@@ -139,6 +139,30 @@ jobs:
           python3 upstream/tools/verify_blocivo_20309.py upstream
           echo "20309 patch and 7 tests verified."
 
+      - name: Fix 20309 widget and date picker compatibility with compiled base
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          package=Path('upstream/uhabits-android/src/main/java/org/isoron/uhabits/activities/tasks')
+          widget=package/'TaskWidget.kt'
+          w=widget.read_text()
+          original='store.blockSummary(today, active).percentage'
+          replacement='store.list(today, active).let { tasks -> if (tasks.isEmpty()) 0 else 100 * tasks.count { it.status == "DONE" } / tasks.size }'
+          assert w.count(original)==1, 'Widget percentage anchor mismatch'
+          widget.write_text(w.replace(original,replacement))
+          activity=package/'TasksActivity.kt'
+          a=activity.read_text()
+          assert a.count('TasksWidget.refresh(this)')==1, 'Widget refresh anchor mismatch'
+          a=a.replace('TasksWidget.refresh(this)','TaskWidget.refreshAll(this)')
+          assert a.count('R.style.VazifalarDatePickerTheme')==3, 'Date picker style anchor mismatch'
+          a=a.replace('R.style.VazifalarDatePickerTheme','R.style.BlocivoDatePickerTheme')
+          activity.write_text(a)
+          print('PASS: widget stats, widget refresh and date picker style fixed')
+          PY
+          grep -q 'versionCode = 20309' upstream/uhabits-android/build.gradle.kts
+
       - name: Java 17
         uses: actions/setup-java@v4
         with:
