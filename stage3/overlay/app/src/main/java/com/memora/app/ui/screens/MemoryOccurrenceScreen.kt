@@ -78,7 +78,8 @@ fun MemoryOccurrenceScreen(
     val storage=remember(context) { MemoryAlbumStorage(context.applicationContext) }
     val path=photo?.relativePath
     val bitmap by produceState<Bitmap?>(null,path) {
-        value=if(path==null) null else withContext(Dispatchers.IO) { storage.load(path) }
+        value=null
+        if(path!=null) value=withContext(Dispatchers.IO) { storage.load(path) }
     }
     val ready=note!=null || (photo!=null && bitmap!=null)
     val failure=if(uz) "Saqlanmadi. Qayta urinib ko‘ring." else "Could not save. Try again."
@@ -189,10 +190,23 @@ fun MemoryOccurrenceScreen(
                     style=MaterialTheme.typography.labelMedium,color=MaterialTheme.colorScheme.onSurfaceVariant)
                 Row(verticalAlignment=Alignment.CenterVertically) {
                     val liked=event?.likedAt!=null
+                    val heartScale=remember(eventId) { Animatable(1f) }
+                    var previousLiked by remember(eventId) { mutableStateOf<Boolean?>(null) }
+                    LaunchedEffect(liked) {
+                        val newlyLiked=previousLiked==false && liked
+                        previousLiked=liked
+                        val enabled=android.os.Build.VERSION.SDK_INT<26 || android.animation.ValueAnimator.areAnimatorsEnabled()
+                        if(newlyLiked && enabled) {
+                            heartScale.animateTo(1.17f,tween(100))
+                            heartScale.animateTo(1f,tween(140))
+                        } else heartScale.snapTo(1f)
+                    }
                     IconButton(enabled=canReact && ready && !busy,onClick={
                         mutate(action={tree.setLike(eventId,!liked,System.currentTimeMillis())})
                     }) { Icon(if(liked)Icons.Rounded.Favorite else Icons.Rounded.FavoriteBorder,
-                        if(uz)"Like" else "Like",tint=if(liked) Color(0xffb95661) else MaterialTheme.colorScheme.onSurfaceVariant) }
+                        if(liked) { if(uz)"Likeni bekor qilish" else "Remove like" } else { if(uz)"Like" else "Like" },
+                        modifier=Modifier.graphicsLayer { scaleX=heartScale.value;scaleY=heartScale.value },
+                        tint=if(liked) Color(0xffb95661) else MaterialTheme.colorScheme.onSurfaceVariant) }
                     Text(likeCount.toString())
                     Spacer(Modifier.width(16.dp))
                     IconButton(enabled=event!=null && !busy,onClick={
