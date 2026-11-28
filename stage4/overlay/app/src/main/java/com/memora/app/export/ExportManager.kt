@@ -674,7 +674,7 @@ function showOverlay(id){document.getElementById(id).classList.add('show')}funct
     suspend fun write(request: ExportRequest, uri: Uri, language: AppLanguage) {
         val range = request.range()
         val type = request.scopeNoteType()
-        val notes = repository.notesForExport(type, range.start, range.end)
+        val notes = if(request.format==ExportFormat.BACKUP) emptyList() else repository.notesForExport(type, range.start, range.end)
         when (request.format) {
             ExportFormat.WORD -> {
                 resolver.openOutputStream(uri)?.use { out ->
@@ -1043,6 +1043,7 @@ Open the HTML file in a modern browser. Images and audio are included in the exp
         val topilmalarBackup = if (request.backupScope == BackupScope.BOTH) {
             topilmalarRepository.backupSnapshot()
         } else null
+        require(notes.size<=MAX_BACKUP_NOTES && album.size<=5000) { "Backup exceeds supported item limit" }
         val root = JSONObject().apply {
             put("format", "MEMORA_BACKUP")
             put("schemaVersion", 8)
@@ -1148,10 +1149,10 @@ Open the HTML file in a modern browser. Images and audio are included in the exp
             }
         }
 
+        val manifestBytes=root.toString().toByteArray(Charsets.UTF_8)
+        require(manifestBytes.size.toLong()<=MAX_MANIFEST_BYTES) { "Backup manifest exceeds supported size" }
         ZipOutputStream(BufferedOutputStream(output)).use { zip ->
             zip.putNextEntry(ZipEntry("manifest.json"))
-            val manifestBytes=root.toString().toByteArray(Charsets.UTF_8)
-            require(manifestBytes.size.toLong()<=MAX_MANIFEST_BYTES) { "Backup manifest exceeds supported size" }
             zip.write(manifestBytes)
             zip.closeEntry()
 
