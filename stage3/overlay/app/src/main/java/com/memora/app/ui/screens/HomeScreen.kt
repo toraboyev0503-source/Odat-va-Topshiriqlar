@@ -76,7 +76,9 @@ fun HomeScreen(
     treeCounts: TreeVisualCounts? = null,
     treeLeaves: List<TreeVisibleLeaf>? = null,
     onTreeLeaf: ((TreeVisibleLeaf) -> Unit)? = null,
-    onTreeTreasure: (() -> Unit)? = null
+    onTreeTreasure: (() -> Unit)? = null,
+    treeArrival: com.memora.app.ui.components.TreeArrival? = null,
+    onTreeArrivalFinished: (String) -> Unit = {}
 ) {
     val inheritedDensity = LocalDensity.current
     val safeScale = uiScale.coerceIn(0.8f, 1.5f)
@@ -111,6 +113,7 @@ fun HomeScreen(
                         counts = counts, visibleLeaves = treeLeaves, dark = isDark,
                         uzbek = language == AppLanguage.UZ,
                         onLeaf = onTreeLeaf, onTreasure = onTreeTreasure,
+                        arrival = treeArrival, onArrivalFinished = onTreeArrivalFinished,
                         modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp).aspectRatio(0.88f)
                     )
                 }

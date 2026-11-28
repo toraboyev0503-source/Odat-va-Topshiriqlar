@@ -160,6 +160,9 @@ fun MemoraApp(
     val mediaStorage = remember(context) { MediaStorage(context.applicationContext) }
     var showExportDialog by remember { mutableStateOf(false) }
     var showNewNoteSheet by remember { mutableStateOf(false) }
+    var treeArrival by remember { mutableStateOf<com.memora.app.ui.components.TreeArrival?>(null) }
+    var selectedTreeSlot by remember { mutableStateOf(0) }
+    var selectedTreeKind by remember { mutableStateOf("SHORT") }
     val backOne: () -> Unit = { navController.popBackStack() }
 
     fun openSingle(route: String) { navController.navigate(route) { launchSingleTop = true } }
@@ -366,7 +369,13 @@ fun MemoraApp(
                                 },
                                 treeCounts = treeCounts,
                                 treeLeaves = treeLeaves,
-                                onTreeLeaf = { leaf -> openSingle(Routes.treeReader(leaf.id)) }
+                                onTreeLeaf = { leaf ->
+                                    selectedTreeSlot=treeLeaves.orEmpty().indexOfFirst { it.id==leaf.id }.coerceIn(0,4)
+                                    selectedTreeKind=leaf.kind
+                                    openSingle(Routes.treeReader(leaf.id))
+                                },
+                                treeArrival=treeArrival,
+                                onTreeArrivalFinished={ id -> if(treeArrival?.eventId==id) treeArrival=null }
                             )
                         }
                     }
@@ -556,7 +565,12 @@ fun MemoraApp(
                                 eventId=entry.arguments?.getString("eventId").orEmpty(),
                                 tree=memoryTreeRepository, repository=repository,
                                 language=settings.language, writingFont=settings.writingFont,
-                                onBack=backOne
+                                onBack=backOne,
+                                onCompleted={ event ->
+                                    treeArrival=com.memora.app.ui.components.TreeArrival(
+                                        event.id,if(event.sourceKey.startsWith("PHOTO:")) "PHOTO" else selectedTreeKind,
+                                        selectedTreeSlot)
+                                }
                             )
                         }
                     }
