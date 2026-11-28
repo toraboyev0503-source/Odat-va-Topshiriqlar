@@ -1,0 +1,106 @@
+name: Memora 0.9.49 Final Integration
+on:
+  push:
+    branches: [memora-tree-stage1]
+    paths:
+      - '.github/workflows/memora-0949-final.yml'
+      - 'stage5/overlay/**'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: memora-0949-final
+  cancel-in-progress: true
+jobs:
+  verify-and-package:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct exact cumulative Android project
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object Memora_0.9.48_GitHub.zip)" = 8f4d2d11efa2d8cbf36885984b0aacabfbb48028
+          PROJECT="$RUNNER_TEMP/memora_0949_final"
+          mkdir -p "$PROJECT"
+          unzip -tq Memora_0.9.48_GitHub.zip
+          unzip -q Memora_0.9.48_GitHub.zip -d "$PROJECT"
+          for n in 1 2 3 4 5; do
+            test -d "stage$n/overlay"
+            cp -a "stage$n/overlay/." "$PROJECT/"
+          done
+          grep -q 'versionName = "0.9.49"' "$PROJECT/app/build.gradle.kts"
+          grep -q 'versionCode = 70' "$PROJECT/app/build.gradle.kts"
+          grep -q 'version = 11,' "$PROJECT/app/src/main/java/com/memora/app/data/local/AppDatabase.kt"
+          test -f "$PROJECT/app/src/main/java/com/memora/app/ui/screens/MemoryTreasureScreen.kt"
+          test -f "$PROJECT/app/src/main/java/com/memora/app/export/MemoryTreeBackupCodec.kt"
+          echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
+          mkdir -p "$GITHUB_WORKSPACE/final-evidence"
+          cp stage5/AUDIT.md final-evidence/AUDIT.md
+          git rev-parse HEAD > final-evidence/commit.txt
+          (cd "$PROJECT" && find app/src -type f -print0 | sort -z | xargs -0 sha256sum) > final-evidence/source-sha256.txt
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+      - run: sdkmanager --install 'platforms;android-36' 'build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Full Kotlin Room build, unit regression and lint
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x gradlew
+          ./gradlew --no-daemon --max-workers=2 --stacktrace :app:assembleDebug :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest
+      - name: Android integration, migration, backup ledger and 100k stress test
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          script: |
+            cd "$PROJECT_DIR"
+            ./gradlew --no-daemon --max-workers=2 --stacktrace :app:connectedDebugAndroidTest
+            adb logcat -d -s MemoryTreeScale:I > "$GITHUB_WORKSPACE/final-evidence/scale-log.txt"
+      - name: Collect verified APK and source package
+        shell: bash
+        run: |
+          set -euo pipefail
+          OUT="$GITHUB_WORKSPACE/final-package"
+          mkdir -p "$OUT"
+          APK="$PROJECT_DIR/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$APK"
+          cp "$APK" "$OUT/Memora_0.9.49_debug.apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose --print-certs "$APK" > final-evidence/apk-signature.txt
+          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" > final-evidence/apk-badging.txt
+          grep -q "name='com.memora.app.debug'" final-evidence/apk-badging.txt
+          grep -q "versionCode='70'" final-evidence/apk-badging.txt
+          (cd "$PROJECT_DIR" && zip -qr "$OUT/Memora_0.9.49_GitHub.zip" . -x '*/build/*' 'build/*' '.gradle/*' '*/.gradle/*' 'local.properties' '.git/*')
+          cp .github/workflows/memora-0949-final.yml "$OUT/memora-0949-final.yml"
+          cp stage5/AUDIT.md "$OUT/AUDIT.md"
+          (cd "$OUT" && sha256sum Memora_0.9.49_debug.apk Memora_0.9.49_GitHub.zip memora-0949-final.yml > SHA256SUMS.txt)
+      - name: Upload verified APK, ZIP, YML and checksums
+        uses: actions/upload-artifact@v4
+        with:
+          name: Memora-0.9.49-verified-package
+          path: final-package/
+          if-no-files-found: error
+          retention-days: 30
+      - name: Upload evidence even on failure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Memora-0.9.49-final-verification
+          path: |
+            final-evidence/
+            ${{ env.PROJECT_DIR }}/app/build/test-results/**
+            ${{ env.PROJECT_DIR }}/app/build/outputs/androidTest-results/**
+            ${{ env.PROJECT_DIR }}/app/build/reports/lint-results-debug.*
+            ${{ env.PROJECT_DIR }}/app/build/generated-room-schemas/**
+          if-no-files-found: warn
+          retention-days: 30
