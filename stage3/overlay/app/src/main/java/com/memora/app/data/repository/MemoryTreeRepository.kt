@@ -35,6 +35,9 @@ class MemoryTreeRepository(private val db: AppDatabase) {
     }
 
     fun observeEvent(id: String) = dao.observeEvent(id)
+    suspend fun currentPendingForNote(noteId: String) = dao.currentPending("NOTE:"+noteId)
+    fun observeLikeCount(key: String) = dao.observeLikeCount(key)
+    fun observeImpressions(key: String) = dao.observeImpressions(key)
     fun observePhoto(id: Long) = dao.observePhoto(id)
     suspend fun getEvent(id: String) = dao.byId(id)
 

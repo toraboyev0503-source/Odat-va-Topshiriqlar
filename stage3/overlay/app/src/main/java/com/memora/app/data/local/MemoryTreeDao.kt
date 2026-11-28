@@ -60,6 +60,16 @@ interface MemoryTreeDao {
     @Query("SELECT * FROM memory_tree_recall WHERE id=:id")
     fun observeEvent(id: String): Flow<TreeRecallEntity?>
 
+    @Query("SELECT * FROM memory_tree_recall WHERE currentKey=:key AND state='PENDING' LIMIT 1")
+    suspend fun currentPending(key: String): TreeRecallEntity?
+
+    @Query("""SELECT COUNT(*) FROM memory_tree_recall WHERE sourceKey=:key AND likedAt IS NOT NULL""")
+    fun observeLikeCount(key: String): Flow<Long>
+
+    @Query("""SELECT * FROM memory_tree_recall WHERE sourceKey=:key AND impression IS NOT NULL
+        ORDER BY impressionCreatedAt,id""")
+    fun observeImpressions(key: String): Flow<List<TreeRecallEntity>>
+
     @Query("""WITH sources AS (
         SELECT 'NOTE:' || id AS sourceKey,type AS kind,createdAt FROM notes WHERE type IN ('SHORT','LONG')
         UNION ALL SELECT 'PHOTO:' || id AS sourceKey,'PHOTO' AS kind,capturedAt AS createdAt FROM memory_album_photos
