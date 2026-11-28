@@ -86,9 +86,13 @@ class MemoryTreeRepository(private val db: AppDatabase) {
         done
     }
     suspend fun setLike(id: String, liked: Boolean, at: Long) = dao.setLike(id,liked,at) == 1
-    suspend fun setImpression(id: String, body: String, at: Long): Boolean {
-        require(body.isNotBlank())
-        return dao.setImpression(id,body,at) == 1
+    suspend fun setImpression(id: String, body: String, at: Long): Boolean = db.withTransaction {
+        val clean=body.trim()
+        require(clean.isNotBlank())
+        val existing=dao.byId(id) ?: return@withTransaction false
+        if(existing.state!="PENDING") return@withTransaction false
+        if(existing.impression==clean) return@withTransaction true
+        dao.setImpression(id,clean,at)==1
     }
     suspend fun returnTreasure(at: Long) = dao.returnTreasure(at)
 }

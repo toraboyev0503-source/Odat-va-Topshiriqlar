@@ -124,7 +124,8 @@ interface MemoryTreeDao {
     @Query("""UPDATE memory_tree_recall SET impression=:body,
         impressionEditedAt=CASE WHEN impressionCreatedAt IS NULL THEN NULL ELSE :at END,
         impressionCreatedAt=COALESCE(impressionCreatedAt,:at)
-        WHERE id=:id AND state='PENDING' AND currentKey IS NOT NULL""")
+        WHERE id=:id AND state='PENDING' AND currentKey IS NOT NULL
+        AND (impression IS NULL OR impression!=:body)""")
     suspend fun setImpression(id: String, body: String, at: Long): Int
 
     @Query("""UPDATE memory_tree_recall SET state='RETURNED',currentKey=NULL,returnedAt=:at

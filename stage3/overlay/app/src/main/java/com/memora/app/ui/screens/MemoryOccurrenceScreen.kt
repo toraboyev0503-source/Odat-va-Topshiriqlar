@@ -52,7 +52,7 @@ import java.time.format.DateTimeFormatter
 fun MemoryOccurrenceScreen(
     eventId: String,tree: MemoryTreeRepository,repository: MemoraRepository,
     language: AppLanguage,writingFont: FontChoice,onBack: () -> Unit,
-    onCompleted: (TreeRecallEntity) -> Unit = {}
+    onCompleted: (TreeRecallEntity,String) -> Unit = { _,_ -> }
 ) {
     val uz=language==AppLanguage.UZ
     val scope=rememberCoroutineScope()
@@ -101,7 +101,7 @@ fun MemoryOccurrenceScreen(
         mutate(action={
             tree.complete(current.id,System.currentTimeMillis()) ||
                 tree.getEvent(current.id)?.state=="TREASURE"
-        },onSuccess={ onCompleted(current); onBack() })
+        },onSuccess={ onCompleted(current,note?.type ?: "PHOTO"); onBack() })
     }
     BackHandler { exit() }
     val opening=remember(eventId) { Animatable(.96f) }

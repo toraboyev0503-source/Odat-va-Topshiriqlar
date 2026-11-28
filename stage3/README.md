@@ -1,0 +1,10 @@
+# Memora 0.9.49 — Stage 3 / Memory interaction
+
+Cumulative order: pinned 0.9.48 ZIP -> stage1/overlay -> stage2/overlay -> stage3/overlay. Same versionName 0.9.49 and versionCode 70. No new workflow/build in this stage.
+
+Implemented:
+- Single existing MemoryScheduler and memory_recall_events operational table. Daily transactional selection 1–5, note/photo source keys, unseen first, exclusion of current/queued/treasure leaves and already planned source keys. Keep original seven-day minimum age and original time spacing. The current day's existing plan is preserved after count changes; new count applies on the next newly planned day.
+- Alarm delivery and missed delivery share transaction, idempotent occurrence ID, operational cache pruning never deletes permanent ledger. Notification dismiss does not consume a leaf. Photo capture reminders are unchanged. Notification text does not disclose private journal contents.
+- Reuse ReaderScreen for original notes and original media; memory mode disables edit/delete actions. Exact album photo and stored color filter. Occurrence-aware navigation and original date/type/age. Likes and one editable reflection per occurrence, chronological reflection history. Completion only on successful explicit reader exit with available original content; comment back, rotation, background, loading/missing content do not consume the leaf. Post-commit visual arrival into jar, not a data mutation.
+- Tests added for 1–5 daily counts, planning, repeated alarms, reaction idempotency, pruning, and source priority. Tests are not executed in this stage per the agreed final-only build plan. Stage-4 treasure route, return animation, backup/restore and delete/restore policy integration remain.
+- Technical follow-ups for stage 5: validate Compose/Room compilation, lifecycle/navigation, alarm timing and daylight-saving boundaries, small screens, accessibility, and animation fidelity on device. Programmatic vector illustration is not the reference image; visual parity is unverified. Prior stage-1 CI may still be active.

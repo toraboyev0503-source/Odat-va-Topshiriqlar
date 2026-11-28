@@ -162,7 +162,6 @@ fun MemoraApp(
     var showNewNoteSheet by remember { mutableStateOf(false) }
     var treeArrival by remember { mutableStateOf<com.memora.app.ui.components.TreeArrival?>(null) }
     var selectedTreeSlot by remember { mutableStateOf(0) }
-    var selectedTreeKind by remember { mutableStateOf("SHORT") }
     val backOne: () -> Unit = { navController.popBackStack() }
 
     fun openSingle(route: String) { navController.navigate(route) { launchSingleTop = true } }
@@ -241,6 +240,7 @@ fun MemoraApp(
 
     LaunchedEffect(pendingMemoryNote) {
         val id = pendingMemoryNote ?: return@LaunchedEffect
+        selectedTreeSlot=0
         if(id.startsWith("tree-event:")) {
             val occurrence=id.removePrefix("tree-event:")
             if(memoryTreeRepository.getEvent(occurrence)!=null) {
@@ -371,7 +371,6 @@ fun MemoraApp(
                                 treeLeaves = treeLeaves,
                                 onTreeLeaf = { leaf ->
                                     selectedTreeSlot=treeLeaves.orEmpty().indexOfFirst { it.id==leaf.id }.coerceIn(0,4)
-                                    selectedTreeKind=leaf.kind
                                     openSingle(Routes.treeReader(leaf.id))
                                 },
                                 treeArrival=treeArrival,
@@ -566,10 +565,8 @@ fun MemoraApp(
                                 tree=memoryTreeRepository, repository=repository,
                                 language=settings.language, writingFont=settings.writingFont,
                                 onBack=backOne,
-                                onCompleted={ event ->
-                                    treeArrival=com.memora.app.ui.components.TreeArrival(
-                                        event.id,if(event.sourceKey.startsWith("PHOTO:")) "PHOTO" else selectedTreeKind,
-                                        selectedTreeSlot)
+                                onCompleted={ event,kind ->
+                                    treeArrival=com.memora.app.ui.components.TreeArrival(event.id,kind,selectedTreeSlot)
                                 }
                             )
                         }
