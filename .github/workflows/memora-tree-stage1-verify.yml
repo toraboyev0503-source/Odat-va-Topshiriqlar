@@ -1,0 +1,76 @@
+name: Memora 0.9.49 Tree Foundation Verification
+on:
+  push:
+    branches: [memora-tree-stage1]
+    paths:
+      - 'stage1/overlay/**'
+      - '.github/workflows/memora-tree-stage1-verify.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: memora-tree-stage1-verify
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - name: Reconstruct candidate from pinned baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$(git hash-object Memora_0.9.48_GitHub.zip)" = 8f4d2d11efa2d8cbf36885984b0aacabfbb48028
+          PROJECT="$RUNNER_TEMP/memora_tree_0949"
+          mkdir -p "$PROJECT"
+          unzip -tq Memora_0.9.48_GitHub.zip
+          unzip -q Memora_0.9.48_GitHub.zip -d "$PROJECT"
+          cp -a stage1/overlay/. "$PROJECT/"
+          grep -q 'versionName = "0.9.49"' "$PROJECT/app/build.gradle.kts"
+          grep -q 'version = 11,' "$PROJECT/app/src/main/java/com/memora/app/data/local/AppDatabase.kt"
+          (cd "$PROJECT" && zip -qr "$GITHUB_WORKSPACE/Memora_0.9.49_stage1_candidate.zip" .)
+          sha256sum Memora_0.9.49_stage1_candidate.zip > Memora_0.9.49_stage1_candidate.sha256
+          echo "PROJECT_DIR=$PROJECT" >> "$GITHUB_ENV"
+      - name: Upload source candidate (not a release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: Memora-0.9.49-stage1-source-candidate
+          path: |
+            Memora_0.9.49_stage1_candidate.zip
+            Memora_0.9.49_stage1_candidate.sha256
+          if-no-files-found: error
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools'
+      - run: sdkmanager --install 'platforms;android-36' 'build-tools;36.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Kotlin and Room compilation, unit regression, lint
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          chmod +x gradlew
+          ./gradlew --no-daemon --max-workers=1 --stacktrace :app:testDebugUnitTest :app:lintDebug :app:assembleDebugAndroidTest
+      - name: Verify Room migration and tree transaction behavior on emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          script: |
+            cd "$PROJECT_DIR"
+            ./gradlew --no-daemon --max-workers=1 :app:connectedDebugAndroidTest -Pandroid.testInstrumentationRunnerArguments.class=com.memora.app.data.local.AppDatabaseMigrationTest,com.memora.app.data.local.MemoryTreeRoomTest
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: Memora-0.9.49-stage1-verification
+          path: |
+            ${{ env.PROJECT_DIR }}/app/build/test-results/**
+            ${{ env.PROJECT_DIR }}/app/build/outputs/androidTest-results/**
+            ${{ env.PROJECT_DIR }}/app/build/reports/lint-results-debug.*
+            ${{ env.PROJECT_DIR }}/app/build/generated-room-schemas/**
+          if-no-files-found: warn

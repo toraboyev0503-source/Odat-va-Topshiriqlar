@@ -131,6 +131,7 @@ android {
 
     sourceSets {
         getByName("androidTest").assets.srcDir("$projectDir/schemas")
+        getByName("androidTest").assets.srcDir("$projectDir/build/generated-room-schemas")
     }
 
     lint {
