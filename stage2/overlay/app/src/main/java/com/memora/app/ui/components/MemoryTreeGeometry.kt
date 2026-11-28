@@ -83,11 +83,11 @@ internal object MemoryTreeGeometry {
     fun glyphs(stage: Int,short: Long,long: Long,photo: Long): List<TreeGlyph> {
         val counts=distribution(short,long,photo)
         val kinds=counts.flatMapIndexed { kind,n -> List(n){kind} }.shuffled(Random(7321))
-        val tips=twigs.filter { it.stage<=stage.coerceIn(0,5) }
+        val tips=twigs.filter { it.stage<=stage.coerceIn(0,5) }.shuffled(Random(4912))
         val r=Random(1779)
         return kinds.mapIndexed { i,kind ->
             // Spread the canopy evenly among stable branch tips, not independent random dots.
-            val tip=tips[(i*7+i/tips.size)%tips.size]
+            val tip=tips[i%tips.size]
             val ring=(i/tips.size).coerceAtMost(12)
             val radius=16f+ring*5f
             val x=(tip.x1+(r.nextFloat()-.5f)*radius*2f).coerceIn(43f,957f)

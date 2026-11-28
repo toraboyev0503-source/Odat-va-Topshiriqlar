@@ -78,7 +78,7 @@ fun HomeScreen(
     onMemoryDismiss: () -> Unit,
     onMemoryLater: () -> Unit,
     treeCounts: TreeVisualCounts? = null,
-    treeLeaves: List<TreeVisibleLeaf> = emptyList(),
+    treeLeaves: List<TreeVisibleLeaf>? = null,
     onTreeLeaf: ((TreeVisibleLeaf) -> Unit)? = null,
     onTreeTreasure: (() -> Unit)? = null
 ) {
@@ -116,7 +116,7 @@ fun HomeScreen(
                 Spacer(Modifier.height(12.dp))
                 // Keep the first real counts stable; never flash a fictitious zero tree.
                 treeCounts?.let { counts ->
-                    MemoryTreeScene(
+                    if (treeLeaves != null) MemoryTreeScene(
                         counts = counts, visibleLeaves = treeLeaves, dark = isDark,
                         uzbek = language == AppLanguage.UZ,
                         onLeaf = onTreeLeaf, onTreasure = onTreeTreasure,

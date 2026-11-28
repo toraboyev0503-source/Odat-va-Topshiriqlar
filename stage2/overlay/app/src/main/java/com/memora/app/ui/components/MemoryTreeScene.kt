@@ -124,7 +124,7 @@ fun MemoryTreeScene(
     BoxWithConstraints(modifier) {
         val sceneWidth=maxWidth
         val sceneHeight=maxHeight
-        val leafSize=(sceneWidth*.15f).coerceIn(48.dp,64.dp)
+        val leafSize=(sceneWidth*.14f).coerceIn(48.dp,58.dp)
         val jarWidth=(sceneWidth*.24f).coerceIn(72.dp,108.dp)
         val jarHeight=(sceneHeight*.29f).coerceIn(96.dp,150.dp)
         val plaqueWidth=(sceneWidth*.41f).coerceIn(124.dp,192.dp)
@@ -213,7 +213,7 @@ private fun FallingLeafControl(
     val progress=remember(leaf.id) { Animatable(1f) }
     var played by remember(leaf.id) { mutableStateOf(false) }
     LaunchedEffect(animate,active,reduce) {
-        if(!active || reduce) {
+        if(!animate || !active || reduce) {
             if(animate) played=true
             progress.snapTo(1f)
         } else if(animate && !played) {

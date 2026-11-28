@@ -337,7 +337,7 @@ fun MemoraApp(
                             }.collectAsStateWithLifecycle(initialValue = null)
                             val treeLeaves by remember(memoryTreeRepository) {
                                 memoryTreeRepository.observeVisualLeaves().distinctUntilChanged()
-                            }.collectAsStateWithLifecycle(emptyList())
+                            }.collectAsStateWithLifecycle(initialValue = null)
                             val todayKey = remember { TimeTraceStorage.todayKey() }
                             HomeScreen(
                                 language = settings.language,
@@ -362,7 +362,7 @@ fun MemoraApp(
                                         openSingle(Routes.TIME_TRACE)
                                     }
                                 },
-                                memoryNote = latestNote?.takeUnless { note -> treeLeaves.any { it.sourceKey == "NOTE:" + note.id } },
+                                memoryNote = latestNote?.takeUnless { note -> treeLeaves.orEmpty().any { it.sourceKey == "NOTE:" + note.id } },
                                 onMemoryRead = {
                                     latestMemory?.let { event ->
                                         scope.launch { repository.markRecall(event.id, "READ") }
